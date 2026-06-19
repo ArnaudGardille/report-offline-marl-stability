@@ -9,11 +9,13 @@ The project implements two algorithms on top of an IQL backbone:
    current policies, and
 2. a **conformal test-martingale drift detector**.
 
-> **Status — Milestone M2 (IQL training backbone).**
-> The uv project, the Simultaneous-Attack env (M1), and the IQL backbone (M2) are
-> in place. M2 adds a pure-functional, jit+vmap-able IQL loop with a flashbax
-> replay buffer, a recurrence-ready Q-network interface, and a swappable-sampler
-> seam that later milestones (conformal selection / drift detection) plug into.
+> **Status — Milestone M4 (conformal drift-detection martingale).**
+> In place: the uv project, the Simultaneous-Attack env (M1), the IQL backbone
+> (M2), the conformal scores + p-values + selection samplers (M3), and now the
+> conformal **test-martingale drift detector** (M4): a score-agnostic, jit/scan-based
+> mixture power-martingale over a p-value stream with Ville's-inequality alarms and
+> reset-on-alarm, validated against `E[M_t]=1` / Ville false-alarm control, with a
+> controlled-swap demo on Simultaneous-Attack and Overcooked.
 
 ## Layout
 
@@ -27,15 +29,21 @@ code/
 │   │   └── simultaneous_attack.py   # M1: 1-step cooperative coordination bandit
 │   ├── networks.py         # M2: recurrence-ready Q-network (FF cell + GRU drop-in)
 │   ├── replay.py           # M2: Transition schema + flashbax item buffer
-│   ├── samplers.py         # M2: swappable sampler seam (registry + `uniform`)
-│   └── iql.py              # M2: pure-functional IQL (make_train -> train(rng))
+│   ├── samplers.py         # M2/M3: swappable sampler seam (uniform + conformal)
+│   ├── iql.py              # M2: pure-functional IQL (make_train -> train(rng))
+│   ├── conformal.py        # M3: non-conformity scores + inductive conformal p-values
+│   └── martingale.py       # M4: conformal drift-detection test martingale (Alg. 2)
 ├── scripts/
-│   └── train.py            # M2: CLI trainer (Simu / simple_spread, multi-seed)
+│   ├── train.py            # M2: CLI trainer (Simu / simple_spread, multi-seed)
+│   ├── ablation.py         # M3: uniform vs conformal selection ablation
+│   └── drift_demo.py       # M4: controlled-swap drift demo (Simu + Overcooked)
 └── tests/
     ├── __init__.py
     ├── test_smoke.py            # toolchain smoke tests (jit/vmap + JaxMARL)
     ├── test_simultaneous_attack.py  # M1 reward-correctness + interface tests
-    └── test_iql_learns.py       # M2 fast learning test + vmap/sampler/schema checks
+    ├── test_iql_learns.py       # M2 fast learning test + vmap/sampler/schema checks
+    ├── test_conformal.py        # M3 score algebra + p-value super-uniformity
+    └── test_martingale.py       # M4 E[M_t]=1 / Ville / detection validity gate
 ```
 
 ## M2 — IQL backbone
@@ -74,6 +82,41 @@ uv run python scripts/train.py --env simu   --seeds 8   # Simultaneous-Attack N=
 uv run python scripts/train.py --env spread --seeds 3   # MPE simple_spread
 uv run python scripts/train.py --env both
 ```
+
+## M4 — conformal drift-detection martingale
+
+`conformal_marl.martingale` implements the paper's Algorithm 2: an *anytime-valid*
+sequential test that consumes a stream of conformal p-values and alarms when the
+perceived environment has **drifted**. It is **score-agnostic** (takes p-values, not
+transitions), so the same detector works for any conditionally super-uniform stream.
+
+- **Mixture power martingale.** For a fixed mixing parameter `ε`,
+  `M_t^ε = Π_{j≤t} ε·p_j^{ε-1}` is a non-negative martingale with `E[M_t^ε]=1` under the
+  null (each factor has mean `ε·∫₀¹ p^{ε-1}dp = 1`). To avoid choosing `ε`, the detector
+  averages over a grid `ε ∈ {0.1,…,0.9}` (a uniform-prior approximation of the mixture
+  `∫₀¹ … dε`; the single-factor closed form `∫₀¹ ε p^{ε-1}dε = (1/p+ln p−1)/(ln p)²` is
+  kept as a reference in `mixture_closed_form_factor`). The grid average is itself a
+  convex combination of unit-mean martingales, so `E[M_t]=1` exactly.
+- **Log-space + `lax.scan`.** Per-grid running log-sums `L_t^ε = Σ_{j≤t}[ln ε+(ε−1)ln p_j]`
+  are carried through a `jax.lax.scan`; the mixture is `logsumexp(L_t^ε)−ln(n_grid)`. This
+  is numerically stable (`M_t` overflows float under strong drift; `log M_t` stays finite)
+  and fully `jit`/`vmap`-able.
+- **Ville's inequality + reset.** Under the null, `P(sup_t M_t ≥ 1/δ) ≤ δ`. The detector
+  **alarms** when `M_t ≥ 1/δ`, then resets `M←1` (via `lax.cond` inside the scan) to
+  re-arm for the next change point.
+
+```bash
+uv run python scripts/drift_demo.py                  # Simu + Overcooked controlled-swap demo
+uv run python scripts/drift_demo.py --no-overcooked  # Simu only (fastest)
+```
+
+The demo trains a short IQL policy, **fixes** a pre-drift calibration set, then at a known
+step swaps one agent's policy (Simu: flip the partner's action; Overcooked: a scripted
+non-conforming partner) and feeds the incoming transitions' p-values to the martingale.
+Figures land in `results/m4_drift_demo_{simu,overcooked}.png`; the detector is controlled
+before the swap and crosses `1/δ` shortly after. (Note: Overcooked's task reward is sparse
+and stays ~0 at the demo's tiny training budget — but the drift signal depends only on how
+(un)likely the partner's actions are under the learner's policy, not on reward.)
 
 ## Requirements
 
