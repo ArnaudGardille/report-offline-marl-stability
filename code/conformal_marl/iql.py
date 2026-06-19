@@ -82,6 +82,11 @@ class IQLConfig:
     max_grad_norm: float = 10.0
     gamma: float = 0.99
     batch_size: int = 64  # trained batch B (== L drawn for the uniform sampler)
+    # LaBER large-batch L: the buffer draws this many items per sample; conformal
+    # samplers subsample it down to ``batch_size`` (B). ``None`` -> L = B (no
+    # subsampling, the ``uniform`` default). A typical LaBER setting is L = m * B
+    # with m in {2..8}; larger L gives the conformal filter more to choose from.
+    large_batch_size: int | None = None
     buffer_size: int = 20_000
 
     # --- target network ---
@@ -96,9 +101,25 @@ class IQLConfig:
     # --- sampler seam ---
     sampler_name: str = "uniform"
 
+    # --- conformal selection (M3) ---
+    # Size of the fresh calibration set C threaded to conformal samplers. It is the
+    # most-recent ``cal_size`` collected (on-policy) transitions, held out from the
+    # buffer's uniform draw -- the inductive-conformal calibration set against which
+    # buffer scores are ranked into p-values. Ignored by the ``uniform`` sampler.
+    # Must be <= steps_per_update() (one collection chunk).
+    cal_size: int = 64
+
     # --- evaluation ---
     eval_episodes: int = 32  # parallel greedy eval episodes
     eval_steps: int = 64  # steps per greedy eval rollout (>= env horizon)
+
+    def draw_batch_size(self) -> int:
+        """Number of items the buffer draws per sample (LaBER's ``L``).
+
+        ``large_batch_size`` if set, else ``batch_size`` (so ``uniform`` draws exactly
+        the trained batch and does no subsampling).
+        """
+        return self.large_batch_size if self.large_batch_size is not None else self.batch_size
 
     def steps_per_update(self) -> int:
         """Env steps collected per outer iteration."""
@@ -238,7 +259,9 @@ def make_train(config: IQLConfig, env: Any) -> Callable[[chex.PRNGKey], dict]:
     buffer = make_replay_buffer(
         max_size=cfg.buffer_size,
         min_size=cfg.learning_starts,
-        sample_batch_size=cfg.batch_size,
+        # Draw L (>= B) so conformal samplers can subsample to B (LaBER seam). For
+        # ``uniform`` L == B, so no subsampling happens.
+        sample_batch_size=cfg.draw_batch_size(),
     )
     sampler = get_sampler(cfg.sampler_name)
 
@@ -350,6 +373,18 @@ def make_train(config: IQLConfig, env: Any) -> Callable[[chex.PRNGKey], dict]:
             add_batch = jax.tree_util.tree_map(_to_add_batch, traj)
             buffer_state = buffer.add(runner["buffer_state"], add_batch)
 
+            # --- conformal calibration set: the freshest on-policy transitions ---
+            # Take the last ``cal_size`` rows of the just-collected chunk. These are
+            # drawn under the current (collection) policy and are held out from the
+            # buffer's uniform draw, so they are a valid inductive-conformal
+            # calibration set C for scoring the buffer. (Re-collected every outer
+            # iteration -> a fresh FIFO that tracks the moving policy.) The whole
+            # chunk lives in ``add_batch``; the uniform sampler ignores ``cal_batch``,
+            # so this slice is pure overhead only for the conformal samplers.
+            cal_batch = jax.tree_util.tree_map(
+                lambda x: x[-cfg.cal_size:], add_batch
+            )
+
             # --- LEARN: num_grad_steps gradient updates on sampled batches ---
             ctx = SamplerContext(
                 online_params=ts.params,
@@ -359,6 +394,8 @@ def make_train(config: IQLConfig, env: Any) -> Callable[[chex.PRNGKey], dict]:
                 num_actions=info.num_actions,
                 hidden_dim=cfg.hidden_dim,
                 gamma=cfg.gamma,
+                epsilon=_epsilon_by_step(step, cfg),
+                cal_batch=cal_batch,
             )
 
             def _grad_step(lstate, _):
@@ -462,9 +499,17 @@ def make_train(config: IQLConfig, env: Any) -> Callable[[chex.PRNGKey], dict]:
 
             td_err_BN = chosen_q_BN - jax.lax.stop_gradient(target_BN)
             se_BN = td_err_BN**2
-            # Per-sample weights apply per transition; broadcast across agents.
-            w_BN = jnp.repeat(weights, n)
-            return jnp.sum(w_BN * se_BN) / (jnp.sum(w_BN) + 1e-8)
+            # Per-sample weights. Two accepted shapes:
+            #   * (B,)   per-transition weight, broadcast across agents (uniform / IS);
+            #   * (B, N) per-agent weight -- each agent weights its own action-column
+            #            independently (M3's conformal samplers: agent a down-weights
+            #            transitions whose other-agent actions are unlikely now).
+            # Both reduce to (B*N,) aligned with the flattened (B, N) agent-rows.
+            if weights.ndim == 1:
+                w_flat = jnp.repeat(weights, n)
+            else:
+                w_flat = weights.reshape((b * n,))
+            return jnp.sum(w_flat * se_BN) / (jnp.sum(w_flat) + 1e-8)
 
         # ----------------------------------------------- greedy evaluation
         def greedy_return(params: Any, rng: chex.PRNGKey) -> chex.Array:
