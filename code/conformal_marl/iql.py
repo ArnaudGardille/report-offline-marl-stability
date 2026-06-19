@@ -112,6 +112,12 @@ class IQLConfig:
     # --- evaluation ---
     eval_episodes: int = 32  # parallel greedy eval episodes
     eval_steps: int = 64  # steps per greedy eval rollout (>= env horizon)
+    # When True, greedy return is evaluated *every outer iteration* and returned as a
+    # per-iteration time series ``returns`` of shape ``(num_updates,)``, plus the env
+    # step at each eval ``return_steps``. This is what the M3 ablation plots
+    # (return-vs-steps with inter-seed bands). Off by default to keep the fast
+    # learning test (which only needs start/end) cheap.
+    eval_during_training: bool = False
 
     def draw_batch_size(self) -> int:
         """Number of items the buffer draws per sample (LaBER's ``L``).
@@ -447,9 +453,20 @@ def make_train(config: IQLConfig, env: Any) -> Callable[[chex.PRNGKey], dict]:
                 "updates": updates,
                 "rng": rng,
             }
+            # Optional per-iteration greedy eval -> a return-vs-steps curve for the
+            # ablation. Skipped (returns 0.0) when eval_during_training is False so the
+            # default fast path pays nothing.
+            if cfg.eval_during_training:
+                rng_eval = jax.random.fold_in(runner["rng"], 0)
+                iter_return = greedy_return(ts.params, rng_eval)
+            else:
+                iter_return = jnp.array(0.0)
+
             metrics = {
                 "loss": jnp.mean(losses),
                 "epsilon": _epsilon_by_step(step, cfg),
+                "greedy_return": iter_return,
+                "step": step,
             }
             return runner, metrics
 
@@ -575,6 +592,11 @@ def make_train(config: IQLConfig, env: Any) -> Callable[[chex.PRNGKey], dict]:
             "final_params": runner["train_state"].params,
             "loss": step_metrics["loss"],
             "epsilon": step_metrics["epsilon"],
+            # Per-iteration greedy-return curve and the env-step at each eval. The
+            # curve is all-zeros unless eval_during_training was set (the ablation
+            # sets it); return_steps is always meaningful (cumulative env steps).
+            "returns": step_metrics["greedy_return"],
+            "return_steps": step_metrics["step"],
         }
 
     return train

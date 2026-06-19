@@ -173,6 +173,7 @@ dependencies = [
     { name = "jax" },
     { name = "jaxlib" },
     { name = "jaxmarl" },
+    { name = "matplotlib" },
     { name = "numpy" },
     { name = "optax" },
 ]
@@ -191,6 +192,7 @@ requires-dist = [
     { name = "jax", extras = ["cpu"], specifier = "==0.4.30" },
     { name = "jaxlib", specifier = "==0.4.30" },
     { name = "jaxmarl", specifier = "==0.0.2" },
+    { name = "matplotlib" },
     { name = "numpy" },
     { name = "optax" },
 ]
