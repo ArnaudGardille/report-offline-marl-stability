@@ -74,20 +74,29 @@ def _forward_q_flat(
     params: Any,
     obs_MA: chex.Array,
     hidden_dim: int,
+    carry_MH: chex.Array | None = None,
 ) -> chex.Array:
-    """Feed-forward Q over a flat ``(M, obs_dim)`` batch -> ``(M, A)``.
+    """Q over a flat ``(M, obs_dim)`` batch -> ``(M, A)``, from an optional stored carry.
 
-    Mirrors the forward used by the IQL loss: a zero-width carry and zero resets,
-    a unit time axis added then dropped. ``M`` is whatever flat row count the caller
-    passes (typically ``B * N`` (transition, agent) rows).
+    Mirrors the forward used by the IQL loss: a single time step (unit time axis added
+    then dropped) with zero resets. ``M`` is whatever flat row count the caller passes
+    (typically ``B * N`` (transition, agent) rows).
+
+    ``carry_MH`` is the per-row recurrent carry. For the **feed-forward** net it is the
+    zero-width placeholder (and the stored ``Transition.hidden`` already has width 0, so
+    passing it is a no-op); for the **GRU** it must be the *stored* hidden state ``h_t``
+    that produced Q at collection time, so ``pi_cur`` is evaluated at the right recurrent
+    state (R2D2 stored-state, matching the TD update). ``None`` falls back to a zero-width
+    carry -- valid only for the FF net, kept for callers that predate the recurrent path.
     """
-    from conformal_marl.networks import QNetwork
-
     m = obs_MA.shape[0]
-    carry = QNetwork.initialize_carry(hidden_dim, m)
+    if carry_MH is None:
+        from conformal_marl.networks import QNetwork
+
+        carry_MH = QNetwork.initialize_carry(hidden_dim, m)
     obs_TMA = obs_MA[jnp.newaxis, :, :]  # (1, M, obs_dim)
     resets_TM = jnp.zeros((1, m))
-    _, q_TMA = apply_fn(params, carry, (obs_TMA, resets_TM))
+    _, q_TMA = apply_fn(params, carry_MH, (obs_TMA, resets_TM))
     return q_TMA[0]  # (M, A)
 
 
@@ -118,7 +127,21 @@ def current_log_probs(
     avail_BN = batch.avail_actions.reshape((b * n,) + batch.avail_actions.shape[2:])
     actions_BN = batch.actions.reshape((b * n,))
 
-    q_BNA = _forward_q_flat(apply_fn, params, obs_BN, hidden_dim)
+    # Use the *stored* per-agent recurrent carry as ``h_t``. For the GRU this evaluates
+    # pi_cur at the same hidden state that produced Q at collection (R2D2 stored-state);
+    # for the FF net ``hidden`` has width 0, so this is exactly the original zero-width
+    # forward. The transition schema always carries ``hidden`` (M7), so the conformal
+    # score, samplers and martingale work uniformly on FF and GRU runs.
+    #
+    # We accept a ``hidden`` shaped ``(B, N, H)`` (production: collected / buffer-drawn /
+    # calibration batches). If a caller hands a batch whose ``hidden`` is *not* per-row
+    # batched (e.g. a hand-built FF batch that left it at the zero-width example shape),
+    # the stored carry carries no information anyway (H == 0), so we fall back to a fresh
+    # zero-width carry -- identical result, just not assuming the stale field's shape.
+    h = batch.hidden
+    use_stored = h.ndim == obs_BN.ndim + 1 and h.shape[:2] == batch.actions.shape
+    carry_BN = h.reshape((b * n,) + h.shape[2:]) if use_stored else None
+    q_BNA = _forward_q_flat(apply_fn, params, obs_BN, hidden_dim, carry_BN)
 
     # Masked greedy action per row.
     masked_q = jnp.where(avail_BN > 0, q_BNA, _MASKED_Q)

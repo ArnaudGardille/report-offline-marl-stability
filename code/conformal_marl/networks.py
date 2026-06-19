@@ -158,3 +158,39 @@ class GRUQNetwork(nn.Module):
         return nn.GRUCell(hidden_dim, parent=None).initialize_carry(
             jax.random.PRNGKey(0), (*batch_dims, hidden_dim)
         )
+
+
+# Registry of network classes selectable by name from ``IQLConfig.net_type``. Both
+# speak the identical ``(carry, (obs, resets)) -> (carry, q)`` contract, so the IQL
+# loop only needs the class object -- never an ``if net_type == ...`` branch.
+_NETWORKS: dict[str, type[nn.Module]] = {
+    "ff": QNetwork,
+    "gru": GRUQNetwork,
+}
+
+
+def get_network_cls(net_type: str) -> type[nn.Module]:
+    """Look up a Q-network class by name (``"ff"`` or ``"gru"``); raises if unknown.
+
+    Returns the *class* (not an instance) so callers can both instantiate it (with
+    ``action_dim`` / ``hidden_dim`` / ``init_scale``) and call its static
+    ``initialize_carry`` -- the two things the recurrent training loop needs. The
+    feed-forward ``QNetwork`` has a zero-width carry; the ``GRUQNetwork`` a real one.
+    Because both honour the same signature, swapping ``net_type`` is the *only* change
+    needed to make the whole IQL loop recurrent.
+    """
+    try:
+        return _NETWORKS[net_type]
+    except KeyError as exc:
+        known = sorted(_NETWORKS)
+        raise KeyError(
+            f"unknown net_type {net_type!r}; registered: {known}"
+        ) from exc
+
+
+def make_qnetwork(
+    net_type: str, action_dim: int, hidden_dim: int = 64, init_scale: float = 1.0
+) -> nn.Module:
+    """Instantiate the named Q-network with the given head/trunk sizes."""
+    cls = get_network_cls(net_type)
+    return cls(action_dim=action_dim, hidden_dim=hidden_dim, init_scale=init_scale)

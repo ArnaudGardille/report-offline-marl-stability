@@ -48,6 +48,9 @@ def _make_batch(key, m, num_agents, obs_dim, num_actions, past_p=0.5):
     k_obs, k_act = jax.random.split(key)
     obs = jax.random.normal(k_obs, (m, num_agents, obs_dim))
     actions = jax.random.randint(k_act, (m, num_agents), 0, num_actions).astype(jnp.int32)
+    # Feed-forward batch: the recurrent carry fields are zero-width but must still carry
+    # the (m, N) leading axes so the Transition pytree is batch-consistent (M7 schema).
+    zero_h = jnp.zeros((m, num_agents, 0), dtype=jnp.float32)
     batch = base.replace(
         obs=obs,
         actions=actions,
@@ -56,6 +59,8 @@ def _make_batch(key, m, num_agents, obs_dim, num_actions, past_p=0.5):
         reward=jnp.zeros((m, num_agents)),
         done=jnp.zeros((m, num_agents), dtype=jnp.bool_),
         next_obs=obs,
+        hidden=zero_h,
+        next_hidden=zero_h,
     )
     return batch
 
@@ -84,10 +89,11 @@ def test_score_correctness_hand_derivation():
     past_lp = jnp.log(past_p)
     avail = jnp.ones((b, num_agents, num_actions))
     base = empty_transition(num_agents, obs_dim, num_actions)
+    zero_h = jnp.zeros((b, num_agents, 0), dtype=jnp.float32)
     batch = base.replace(
         obs=obs, actions=actions, behavior_log_prob=past_lp, avail_actions=avail,
         reward=jnp.zeros((b, num_agents)), done=jnp.zeros((b, num_agents), dtype=jnp.bool_),
-        next_obs=obs,
+        next_obs=obs, hidden=zero_h, next_hidden=zero_h,
     )
 
     # --- hand computation of log pi_cur ---

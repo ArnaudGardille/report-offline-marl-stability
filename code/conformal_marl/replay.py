@@ -59,6 +59,16 @@ class Transition:
     next_obs: chex.Array  # (N, obs_dim)
     avail_actions: chex.Array  # (N, A) available-action mask at `obs`
     behavior_log_prob: chex.Array  # (N,) log prob of `actions` under the behaviour policy
+    # M7 recurrent (R2D2-style "stored state") fields. ``hidden`` is the per-agent GRU
+    # carry that produced Q(obs) at collection time (after any episode-boundary reset);
+    # ``next_hidden`` is the carry *after* this step, used to evaluate Q(next_obs) for the
+    # bootstrap target -- so a recurrent TD update is a single GRU cell step from a stored
+    # carry, no time-unroll (no ``nn.scan``). Both are ``(N, H)``; for the feed-forward
+    # net ``H == 0`` (a zero-width placeholder), so these fields cost ~nothing and the FF
+    # path is byte-identical. Adding fields is backward compatible: flashbax derives its
+    # layout from the example transition, so the on-disk schema simply grows.
+    hidden: chex.Array  # (N, H) GRU carry that produced Q(obs); (N, 0) for FF
+    next_hidden: chex.Array  # (N, H) GRU carry after the step (for Q(next_obs)); (N, 0) FF
 
 
 def make_replay_buffer(
@@ -96,11 +106,19 @@ def make_replay_buffer(
     )
 
 
-def empty_transition(num_agents: int, obs_dim: int, num_actions: int) -> Transition:
+def empty_transition(
+    num_agents: int, obs_dim: int, num_actions: int, hidden_dim: int = 0
+) -> Transition:
     """A zero-filled example transition, used to initialise the buffer layout.
 
     flashbax derives the stored item structure (shapes/dtypes) from this example,
     so it must match exactly what :func:`collect`-time code adds.
+
+    ``hidden_dim`` sizes the per-agent recurrent carry fields (``hidden`` /
+    ``next_hidden``). It defaults to ``0`` -- the feed-forward case, where the carry is a
+    zero-width placeholder -- so existing callers that do not use a GRU are unaffected.
+    The recurrent IQL loop passes the GRU's ``hidden_dim`` so the stored states match the
+    cell width.
     """
     return Transition(
         obs=jnp.zeros((num_agents, obs_dim), dtype=jnp.float32),
@@ -110,4 +128,6 @@ def empty_transition(num_agents: int, obs_dim: int, num_actions: int) -> Transit
         next_obs=jnp.zeros((num_agents, obs_dim), dtype=jnp.float32),
         avail_actions=jnp.ones((num_agents, num_actions), dtype=jnp.float32),
         behavior_log_prob=jnp.zeros((num_agents,), dtype=jnp.float32),
+        hidden=jnp.zeros((num_agents, hidden_dim), dtype=jnp.float32),
+        next_hidden=jnp.zeros((num_agents, hidden_dim), dtype=jnp.float32),
     )
