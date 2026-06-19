@@ -20,6 +20,10 @@ dependencies = [
     "optax",
     "flashbax",
     "numpy",
+    # Plotting for the ablation script (scripts/ablation.py). Already present
+    # transitively; pinned as a direct dep so the committed ablation figure is
+    # reproducible from a clean install.
+    "matplotlib",
 ]
 
 [dependency-groups]
