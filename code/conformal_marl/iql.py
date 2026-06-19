@@ -271,6 +271,16 @@ def make_train(config: IQLConfig, env: Any) -> Callable[[chex.PRNGKey], dict]:
     )
     sampler = get_sampler(cfg.sampler_name)
 
+    # The calibration set is sliced from one collection chunk (steps_per_update
+    # transitions). Asking for more than that would silently shrink it, so guard the
+    # static config up front (cheap, outside the traced train).
+    if cfg.cal_size > cfg.steps_per_update():
+        raise ValueError(
+            f"cal_size ({cfg.cal_size}) > steps_per_update ({cfg.steps_per_update()}): "
+            f"the calibration set is taken from one collection chunk, so it cannot "
+            f"exceed num_envs * num_steps. Lower cal_size or raise num_steps/num_envs."
+        )
+
     def _reset_carry(batch: int) -> chex.Array:
         return QNetwork.initialize_carry(cfg.hidden_dim, batch)
 

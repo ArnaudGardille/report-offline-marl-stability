@@ -81,7 +81,7 @@ def simu_ablation_config(sampler: str) -> IQLConfig:
     return IQLConfig(
         total_timesteps=15_000,
         num_envs=8,
-        num_steps=8,
+        num_steps=16,  # chunk = 16*8 = 128 transitions/iter >= cal_size (no shrink)
         num_grad_steps=8,
         learning_starts=256,
         hidden_dim=64,
