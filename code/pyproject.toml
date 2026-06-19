@@ -5,12 +5,20 @@ description = "Conformal Replay for Off-Policy Multi-Agent RL (JAX / JaxMARL imp
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    "jaxmarl",
-    "jax[cpu]",
+    # JaxMARL 0.0.2 was written against an older JAX: its base MultiAgentEnv.step
+    # (and the baselines/QLearning scripts forked at M2) call jax.tree_map, which was
+    # removed in JAX 0.6.0. We therefore pin JAX to 0.4.30 -- the last 0.4.x series
+    # still carries jax.tree_map, has cp312 macOS-arm64 wheels, and satisfies every
+    # downstream floor below. See README.md "Resolved versions" for the rationale.
+    "jaxmarl==0.0.2",
+    "jax[cpu]==0.4.30",
+    "jaxlib==0.4.30",
+    # chex 0.1.91+ requires jax>=0.7.0 (which no longer has tree_map); cap it so the
+    # resolver keeps a tree_map-bearing jax. flax/optax floors are auto-satisfied.
+    "chex<0.1.91",
     "flax",
     "optax",
     "flashbax",
-    "chex",
     "numpy",
 ]
 

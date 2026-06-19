@@ -116,8 +116,6 @@ class SimultaneousAttack(MultiAgentEnv):
             )
 
         self.agents = [f"agent_{i}" for i in range(num_agents)]
-        self.agent_range = jnp.arange(num_agents)
-        self.a_to_i = {a: i for i, a in enumerate(self.agents)}
 
         # Death penalty: derived from N unless explicitly overridden.
         self.r_death = float(default_r_death(num_agents) if r_death is None else r_death)
@@ -138,43 +136,16 @@ class SimultaneousAttack(MultiAgentEnv):
         return self.get_obs(state), state
 
     # ------------------------------------------------------------------- step
-    @partial(jax.jit, static_argnums=[0])
-    def step(
-        self,
-        key: chex.PRNGKey,
-        state: State,
-        actions: Dict[str, chex.Array],
-    ) -> Tuple[
-        Dict[str, chex.Array],
-        State,
-        Dict[str, chex.Array],
-        Dict[str, chex.Array],
-        Dict,
-    ]:
-        """Step the env and auto-reset on episode termination.
-
-        This mirrors :meth:`MultiAgentEnv.step` exactly (compute the transition with
-        :meth:`step_env`, then select the freshly reset state/obs wherever
-        ``dones["__all__"]`` is true) but uses :func:`jax.tree_util.tree_map` instead of
-        the removed ``jax.tree_map``. The base-class implementation calls
-        ``jax.tree_map``, which no longer exists in the pinned JAX (0.10.x), so we
-        override here to stay both compatible and faithful to the JaxMARL auto-reset
-        convention. Because every step is terminal for this environment, the *returned*
-        ``obs``/``state`` are always the post-reset values; ``rewards`` and ``dones``
-        still describe the transition that just occurred.
-        """
-        key, key_reset = jax.random.split(key)
-        obs_st, states_st, rewards, dones, infos = self.step_env(key, state, actions)
-
-        obs_re, states_re = self.reset(key_reset)
-
-        states = jax.tree_util.tree_map(
-            lambda x, y: jax.lax.select(dones["__all__"], x, y), states_re, states_st
-        )
-        obs = jax.tree_util.tree_map(
-            lambda x, y: jax.lax.select(dones["__all__"], x, y), obs_re, obs_st
-        )
-        return obs, states, rewards, dones, infos
+    #
+    # We deliberately do NOT override ``step`` here: the inherited
+    # :meth:`MultiAgentEnv.step` already implements the JaxMARL auto-reset convention
+    # (compute the transition via :meth:`step_env`, then ``jax.lax.select`` the freshly
+    # reset state/obs wherever ``dones["__all__"]`` is true). It works on the pinned
+    # JAX (0.4.30) because that release still provides ``jax.tree_map``; the foundation
+    # smoke guard in ``tests/test_smoke.py`` protects that assumption. Because every
+    # step of this environment is terminal, the *returned* ``obs``/``state`` are always
+    # the post-reset values, while ``rewards``/``dones`` describe the transition that
+    # just occurred.
 
     # --------------------------------------------------------------- step_env
     @partial(jax.jit, static_argnums=[0])
