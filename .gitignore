@@ -1,0 +1,37 @@
+# --- LaTeX build artifacts ---
+*.aux
+*.log
+*.fls
+*.fdb_latexmk
+*.out
+*.blg
+*.bcf
+*.run.xml
+*.toc
+*.lof
+*.lot
+*.synctex.gz
+comment.cut
+
+# --- Reference material (kept on disk, not version-controlled) ---
+# Third-party papers + the internship report; bulky and partly copyrighted.
+sources/
+
+# --- macOS ---
+.DS_Store
+
+# --- Python / uv ---
+__pycache__/
+*.py[cod]
+.venv/
+code/.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+
+# --- Experiment outputs (regenerable; keep scripts, not raw arrays) ---
+*.npz
+outputs/
+multirun/
+wandb/

@@ -1,0 +1,276 @@
+%%% -*-BibTeX-*-
+%%% Do NOT edit. File created by BibTeX with style
+%%% ACM-Reference-Format-Journals [18-Jan-2012].
+
+\begin{thebibliography}{17}
+
+%%% ====================================================================
+%%% NOTE TO THE USER: you can override these defaults by providing
+%%% customized versions of any of these macros before the \bibliography
+%%% command.  Each of them MUST provide its own final punctuation,
+%%% except for \shownote{}, \showDOI{}, and \showURL{}.  The latter two
+%%% do not use final punctuation, in order to avoid confusing it with
+%%% the Web address.
+%%%
+%%% To suppress output of a particular field, define its macro to expand
+%%% to an empty string, or better, \unskip, like this:
+%%%
+%%% \newcommand{\showDOI}[1]{\unskip}   % LaTeX syntax
+%%%
+%%% \def \showDOI #1{\unskip}           % plain TeX syntax
+%%%
+%%% ====================================================================
+
+\ifx \showCODEN    \undefined \def \showCODEN     #1{\unskip}     \fi
+\ifx \showDOI      \undefined \def \showDOI       #1{#1}\fi
+\ifx \showISBNx    \undefined \def \showISBNx     #1{\unskip}     \fi
+\ifx \showISBNxiii \undefined \def \showISBNxiii  #1{\unskip}     \fi
+\ifx \showISSN     \undefined \def \showISSN      #1{\unskip}     \fi
+\ifx \showLCCN     \undefined \def \showLCCN      #1{\unskip}     \fi
+\ifx \shownote     \undefined \def \shownote      #1{#1}          \fi
+\ifx \showarticletitle \undefined \def \showarticletitle #1{#1}   \fi
+\ifx \showURL      \undefined \def \showURL       {\relax}        \fi
+% The following commands are used for tagged output and should be
+% invisible to TeX
+\providecommand\bibfield[2]{#2}
+\providecommand\bibinfo[2]{#2}
+\providecommand\natexlab[1]{#1}
+\providecommand\showeprint[2][]{arXiv:#2}
+
+\bibitem[\protect\citeauthoryear{Angelopoulos and Bates}{Angelopoulos and
+  Bates}{2023}]%
+        {angelopoulos2023gentle}
+\bibfield{author}{\bibinfo{person}{Anastasios~N. Angelopoulos} {and}
+  \bibinfo{person}{Stephen Bates}.} \bibinfo{year}{2023}\natexlab{}.
+\newblock \showarticletitle{Conformal Prediction: A Gentle Introduction}.
+\newblock \bibinfo{journal}{\emph{Foundations and Trends in Machine Learning}}
+  \bibinfo{volume}{16}, \bibinfo{number}{4} (\bibinfo{year}{2023}),
+  \bibinfo{pages}{494--591}.
+\newblock
+
+
+\bibitem[\protect\citeauthoryear{Foerster, Nardelli, Farquhar, Afouras, Torr,
+  Kohli, and Whiteson}{Foerster et~al\mbox{.}}{2017}]%
+        {foerster2017stabilising}
+\bibfield{author}{\bibinfo{person}{Jakob Foerster}, \bibinfo{person}{Nantas
+  Nardelli}, \bibinfo{person}{Gregory Farquhar}, \bibinfo{person}{Triantafyllos
+  Afouras}, \bibinfo{person}{Philip H.~S. Torr}, \bibinfo{person}{Pushmeet
+  Kohli}, {and} \bibinfo{person}{Shimon Whiteson}.}
+  \bibinfo{year}{2017}\natexlab{}.
+\newblock \showarticletitle{Stabilising Experience Replay for Deep Multi-Agent
+  Reinforcement Learning}. In \bibinfo{booktitle}{\emph{International
+  Conference on Machine Learning (ICML)}}.
+\newblock
+\showeprint[arxiv]{1702.08887}~[cs.AI]
+
+
+\bibitem[\protect\citeauthoryear{Lahire, Geist, and Rachelson}{Lahire
+  et~al\mbox{.}}{2022}]%
+        {lahire2022large}
+\bibfield{author}{\bibinfo{person}{Thibault Lahire}, \bibinfo{person}{Matthieu
+  Geist}, {and} \bibinfo{person}{Emmanuel Rachelson}.}
+  \bibinfo{year}{2022}\natexlab{}.
+\newblock \showarticletitle{Large Batch Experience Replay}. In
+  \bibinfo{booktitle}{\emph{International Conference on Machine Learning
+  (ICML)}}.
+\newblock
+\showeprint[arxiv]{2110.01528}~[cs.LG]
+
+
+\bibitem[\protect\citeauthoryear{Lowe, Wu, Tamar, Harb, Abbeel, and
+  Mordatch}{Lowe et~al\mbox{.}}{2017}]%
+        {lowe2017multi}
+\bibfield{author}{\bibinfo{person}{Ryan Lowe}, \bibinfo{person}{Yi Wu},
+  \bibinfo{person}{Aviv Tamar}, \bibinfo{person}{Jean Harb},
+  \bibinfo{person}{Pieter Abbeel}, {and} \bibinfo{person}{Igor Mordatch}.}
+  \bibinfo{year}{2017}\natexlab{}.
+\newblock \showarticletitle{Multi-Agent Actor-Critic for Mixed
+  Cooperative-Competitive Environments}. In \bibinfo{booktitle}{\emph{Advances
+  in Neural Information Processing Systems (NeurIPS)}}.
+\newblock
+\showeprint[arxiv]{1706.02275}~[cs.LG]
+
+
+\bibitem[\protect\citeauthoryear{Matignon, Laurent, and Fort-Piat}{Matignon
+  et~al\mbox{.}}{2012}]%
+        {matignon2012independent}
+\bibfield{author}{\bibinfo{person}{Laetitia Matignon},
+  \bibinfo{person}{Guillaume~J. Laurent}, {and} \bibinfo{person}{Nadine~Le
+  Fort-Piat}.} \bibinfo{year}{2012}\natexlab{}.
+\newblock \showarticletitle{Independent reinforcement learners in cooperative
+  {Markov} games: a survey regarding coordination problems}.
+\newblock \bibinfo{journal}{\emph{The Knowledge Engineering Review}}
+  \bibinfo{volume}{27}, \bibinfo{number}{1} (\bibinfo{year}{2012}),
+  \bibinfo{pages}{1--31}.
+\newblock
+\urldef\tempurl%
+\url{https://doi.org/10.1017/S0269888912000057}
+\showDOI{\tempurl}
+
+
+\bibitem[\protect\citeauthoryear{Mnih, Kavukcuoglu, Silver, Graves, Antonoglou,
+  Wierstra, and Riedmiller}{Mnih et~al\mbox{.}}{2013}]%
+        {mnih2013playing}
+\bibfield{author}{\bibinfo{person}{Volodymyr Mnih}, \bibinfo{person}{Koray
+  Kavukcuoglu}, \bibinfo{person}{David Silver}, \bibinfo{person}{Alex Graves},
+  \bibinfo{person}{Ioannis Antonoglou}, \bibinfo{person}{Daan Wierstra}, {and}
+  \bibinfo{person}{Martin Riedmiller}.} \bibinfo{year}{2013}\natexlab{}.
+\newblock \bibinfo{title}{Playing {Atari} with Deep Reinforcement Learning}.
+\newblock
+\newblock
+\showeprint[arxiv]{1312.5602}~[cs.LG]
+
+
+\bibitem[\protect\citeauthoryear{Ramdas, Gr{\"u}nwald, Vovk, and Shafer}{Ramdas
+  et~al\mbox{.}}{2023}]%
+        {ramdas2023gametheoretic}
+\bibfield{author}{\bibinfo{person}{Aaditya Ramdas}, \bibinfo{person}{Peter
+  Gr{\"u}nwald}, \bibinfo{person}{Vladimir Vovk}, {and} \bibinfo{person}{Glenn
+  Shafer}.} \bibinfo{year}{2023}\natexlab{}.
+\newblock \showarticletitle{Game-Theoretic Statistics and Safe Anytime-Valid
+  Inference}.
+\newblock \bibinfo{journal}{\emph{Statist. Sci.}} \bibinfo{volume}{38},
+  \bibinfo{number}{4} (\bibinfo{year}{2023}), \bibinfo{pages}{576--601}.
+\newblock
+
+
+\bibitem[\protect\citeauthoryear{Rashid, Samvelyan, de~Witt, Farquhar,
+  Foerster, and Whiteson}{Rashid et~al\mbox{.}}{2018}]%
+        {rashid2018qmix}
+\bibfield{author}{\bibinfo{person}{Tabish Rashid}, \bibinfo{person}{Mikayel
+  Samvelyan}, \bibinfo{person}{Christian~Schroeder de Witt},
+  \bibinfo{person}{Gregory Farquhar}, \bibinfo{person}{Jakob Foerster}, {and}
+  \bibinfo{person}{Shimon Whiteson}.} \bibinfo{year}{2018}\natexlab{}.
+\newblock \showarticletitle{{QMIX}: Monotonic Value Function Factorisation for
+  Deep Multi-Agent Reinforcement Learning}. In
+  \bibinfo{booktitle}{\emph{International Conference on Machine Learning
+  (ICML)}}.
+\newblock
+\showeprint[arxiv]{1803.11485}~[cs.LG]
+
+
+\bibitem[\protect\citeauthoryear{Samvelyan, Rashid, de~Witt, Farquhar,
+  Nardelli, Rudner, Hung, Torr, Foerster, and Whiteson}{Samvelyan
+  et~al\mbox{.}}{2019}]%
+        {samvelyan2019starcraft}
+\bibfield{author}{\bibinfo{person}{Mikayel Samvelyan}, \bibinfo{person}{Tabish
+  Rashid}, \bibinfo{person}{Christian~Schroeder de Witt},
+  \bibinfo{person}{Gregory Farquhar}, \bibinfo{person}{Nantas Nardelli},
+  \bibinfo{person}{Tim G.~J. Rudner}, \bibinfo{person}{Chia-Man Hung},
+  \bibinfo{person}{Philip H.~S. Torr}, \bibinfo{person}{Jakob Foerster}, {and}
+  \bibinfo{person}{Shimon Whiteson}.} \bibinfo{year}{2019}\natexlab{}.
+\newblock \showarticletitle{The {StarCraft} Multi-Agent Challenge}. In
+  \bibinfo{booktitle}{\emph{International Conference on Autonomous Agents and
+  MultiAgent Systems (AAMAS)}}.
+\newblock
+\showeprint[arxiv]{1902.04043}~[cs.LG]
+
+
+\bibitem[\protect\citeauthoryear{Schaul, Quan, Antonoglou, and Silver}{Schaul
+  et~al\mbox{.}}{2016}]%
+        {schaul2016prioritized}
+\bibfield{author}{\bibinfo{person}{Tom Schaul}, \bibinfo{person}{John Quan},
+  \bibinfo{person}{Ioannis Antonoglou}, {and} \bibinfo{person}{David Silver}.}
+  \bibinfo{year}{2016}\natexlab{}.
+\newblock \showarticletitle{Prioritized Experience Replay}. In
+  \bibinfo{booktitle}{\emph{International Conference on Learning
+  Representations (ICLR)}}.
+\newblock
+\showeprint[arxiv]{1511.05952}~[cs.LG]
+
+
+\bibitem[\protect\citeauthoryear{Sunehag, Lever, Gruslys, Czarnecki, Zambaldi,
+  Jaderberg, Lanctot, Sonnerat, Leibo, Tuyls, and Graepel}{Sunehag
+  et~al\mbox{.}}{2018}]%
+        {sunehag2018value}
+\bibfield{author}{\bibinfo{person}{Peter Sunehag}, \bibinfo{person}{Guy Lever},
+  \bibinfo{person}{Audrunas Gruslys}, \bibinfo{person}{Wojciech~Marian
+  Czarnecki}, \bibinfo{person}{Vin{\'\i}cius~Flores Zambaldi},
+  \bibinfo{person}{Max Jaderberg}, \bibinfo{person}{Marc Lanctot},
+  \bibinfo{person}{Nicolas Sonnerat}, \bibinfo{person}{Joel~Z. Leibo},
+  \bibinfo{person}{Karl Tuyls}, {and} \bibinfo{person}{Thore Graepel}.}
+  \bibinfo{year}{2018}\natexlab{}.
+\newblock \showarticletitle{Value-Decomposition Networks for Cooperative
+  Multi-Agent Learning}. In \bibinfo{booktitle}{\emph{International Conference
+  on Autonomous Agents and MultiAgent Systems (AAMAS)}}.
+\newblock
+\showeprint[arxiv]{1706.05296}~[cs.AI]
+
+
+\bibitem[\protect\citeauthoryear{Tampuu, Matiisen, Kodelja, Kuzovkin, Korjus,
+  Aru, Aru, and Vicente}{Tampuu et~al\mbox{.}}{2015}]%
+        {tampuu2017multiagent}
+\bibfield{author}{\bibinfo{person}{Ardi Tampuu}, \bibinfo{person}{Tambet
+  Matiisen}, \bibinfo{person}{Dorian Kodelja}, \bibinfo{person}{Ilya Kuzovkin},
+  \bibinfo{person}{Kristjan Korjus}, \bibinfo{person}{Juhan Aru},
+  \bibinfo{person}{Jaan Aru}, {and} \bibinfo{person}{Raul Vicente}.}
+  \bibinfo{year}{2015}\natexlab{}.
+\newblock \showarticletitle{Multiagent Cooperation and Competition with Deep
+  Reinforcement Learning}.
+\newblock
+\showeprint[arxiv]{1511.08779}~[cs.AI]
+
+
+\bibitem[\protect\citeauthoryear{Ville}{Ville}{1939}]%
+        {ville1939etude}
+\bibfield{author}{\bibinfo{person}{Jean Ville}.}
+  \bibinfo{year}{1939}\natexlab{}.
+\newblock \bibinfo{booktitle}{\emph{{\'E}tude critique de la notion de
+  collectif}}.
+\newblock \bibinfo{publisher}{Gauthier-Villars}, \bibinfo{address}{Paris}.
+\newblock
+
+
+\bibitem[\protect\citeauthoryear{Volkhonskiy, Burnaev, Nouretdinov, Gammerman,
+  and Vovk}{Volkhonskiy et~al\mbox{.}}{2017}]%
+        {volkhonskiy2017inductive}
+\bibfield{author}{\bibinfo{person}{Denis Volkhonskiy}, \bibinfo{person}{Evgeny
+  Burnaev}, \bibinfo{person}{Ilia Nouretdinov}, \bibinfo{person}{Alexander
+  Gammerman}, {and} \bibinfo{person}{Vladimir Vovk}.}
+  \bibinfo{year}{2017}\natexlab{}.
+\newblock \showarticletitle{Inductive Conformal Martingales for Change-Point
+  Detection}. In \bibinfo{booktitle}{\emph{Conformal and Probabilistic
+  Prediction and Applications (COPA), PMLR}}, Vol.~\bibinfo{volume}{60}.
+  \bibinfo{pages}{132--153}.
+\newblock
+
+
+\bibitem[\protect\citeauthoryear{Vovk, Gammerman, and Shafer}{Vovk
+  et~al\mbox{.}}{2005}]%
+        {vovk2005algorithmic}
+\bibfield{author}{\bibinfo{person}{Vladimir Vovk}, \bibinfo{person}{Alexander
+  Gammerman}, {and} \bibinfo{person}{Glenn Shafer}.}
+  \bibinfo{year}{2005}\natexlab{}.
+\newblock \bibinfo{booktitle}{\emph{Algorithmic Learning in a Random World}}.
+\newblock \bibinfo{publisher}{Springer}, \bibinfo{address}{New York}.
+\newblock
+
+
+\bibitem[\protect\citeauthoryear{Vovk, Nouretdinov, and Gammerman}{Vovk
+  et~al\mbox{.}}{2003}]%
+        {vovk2003testing}
+\bibfield{author}{\bibinfo{person}{Vladimir Vovk}, \bibinfo{person}{Ilia
+  Nouretdinov}, {and} \bibinfo{person}{Alexander Gammerman}.}
+  \bibinfo{year}{2003}\natexlab{}.
+\newblock \showarticletitle{Testing Exchangeability On-Line}. In
+  \bibinfo{booktitle}{\emph{International Conference on Machine Learning
+  (ICML)}}. \bibinfo{pages}{768--775}.
+\newblock
+
+
+\bibitem[\protect\citeauthoryear{Yu, Velu, Vinitsky, Gao, Wang, Bayen, and
+  Wu}{Yu et~al\mbox{.}}{2022}]%
+        {yu2022surprising}
+\bibfield{author}{\bibinfo{person}{Chao Yu}, \bibinfo{person}{Akash Velu},
+  \bibinfo{person}{Eugene Vinitsky}, \bibinfo{person}{Jiaxuan Gao},
+  \bibinfo{person}{Yu Wang}, \bibinfo{person}{Alexandre Bayen}, {and}
+  \bibinfo{person}{Yi Wu}.} \bibinfo{year}{2022}\natexlab{}.
+\newblock \showarticletitle{The Surprising Effectiveness of {PPO} in
+  Cooperative Multi-Agent Games}. In \bibinfo{booktitle}{\emph{Advances in
+  Neural Information Processing Systems (NeurIPS), Datasets and Benchmarks
+  Track}}.
+\newblock
+\showeprint[arxiv]{2103.01955}~[cs.LG]
+
+
+\end{thebibliography}
