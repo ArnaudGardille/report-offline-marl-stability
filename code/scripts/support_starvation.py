@@ -55,7 +55,7 @@ from pathlib import Path
 import jax
 import numpy as np
 
-from conformal_marl.envs.simultaneous_attack import SimultaneousAttack
+from conformal_marl.envs.registry import make_env
 from conformal_marl.iql import IQLConfig, make_train
 
 import matplotlib
@@ -253,7 +253,7 @@ def main() -> None:
     args = ap.parse_args()
 
     os.environ.setdefault("JAX_PLATFORMS", "cpu")
-    env = SimultaneousAttack(num_agents=3)
+    env, _ = make_env("simu", num_agents=3)
     seeds, base = args.seeds, args.base_seed
     floor = args.floor
 

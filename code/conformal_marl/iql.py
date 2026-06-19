@@ -172,11 +172,19 @@ class EnvInfo:
 
 
 def get_env_info(env: Any) -> EnvInfo:
-    """Pull static shapes/metadata off a (wrapped) JaxMARL env."""
+    """Pull static shapes/metadata off a (wrapped) JaxMARL env.
+
+    ``obs_dim`` is taken from an actual ``reset`` rather than ``observation_space``: some
+    jaxmarl 0.0.2 envs (notably Hanabi) return an *empty-shaped* observation space, whose
+    ``np.prod`` is 1 -- which would mis-size the Q-net's input layer. A single reset is
+    cheap and run once here, outside any traced training code, and is robust for every
+    env the factory builds (the per-agent obs always has the true flat width).
+    """
     agents = list(env.agents)
     a0 = agents[0]
     num_actions = int(env.action_space(a0).n)
-    obs_dim = int(np.prod(env.observation_space(a0).shape))
+    obs0, _ = env.reset(jax.random.PRNGKey(0))
+    obs_dim = int(np.prod(np.asarray(obs0[a0]).shape))
     has_avail = hasattr(env, "get_avail_actions")
     return EnvInfo(
         agents=agents,

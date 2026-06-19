@@ -79,7 +79,7 @@ from jaxmarl.environments.multi_agent_env import MultiAgentEnv
 from jaxmarl.environments.spaces import Box
 
 from conformal_marl.envs.simultaneous_attack import SimultaneousAttack
-from conformal_marl.iql import IQLConfig
+from conformal_marl.iql import IQLConfig, get_env_info
 
 
 # --------------------------------------------------------------------------- wrappers
@@ -133,13 +133,58 @@ class FlatObs(MultiAgentEnv):
     def get_obs(self, state):
         return self._flat(self._env.get_obs(state))
 
-    def get_avail_actions(self, state):
-        # Forward masking if the wrapped env (or its own wrapper) exposes it.
-        return self._env.get_avail_actions(state)
+    def __getattr__(self, name):
+        # Delegate any other attribute to the wrapped env -- crucially including
+        # ``get_avail_actions``, but *only* if the wrapped env actually has it. This way
+        # ``hasattr(FlatObs(env), "get_avail_actions")`` is True exactly when the
+        # underlying env masks (so the IQL loop masks for Hanabi-via-FlatObs but not for
+        # the unmasked Overcooked / Coin-Game). Guarded so the wrapped env set in
+        # __init__ is found via normal lookup first.
+        return getattr(self.__dict__["_env"], name)
+
+
+class CastObs(MultiAgentEnv):
+    """Cast each agent's observation to ``float32`` (shape unchanged).
+
+    Some JaxMARL envs hand out integer observations (Switch-Riddle ``int32``,
+    Coin-Game ``int8``). The IQL backbone stores obs in a ``float32`` flashbax buffer
+    and feeds them to Dense layers, and ``LogWrapper`` asserts the reset/step obs dtypes
+    match -- both of which require a consistent floating dtype. This wrapper casts obs to
+    ``float32`` without flattening (use :class:`FlatObs` when a flatten is also needed;
+    it already casts). Applied automatically by :func:`make_env` to envs whose reset obs
+    is not floating point.
+    """
+
+    def __init__(self, env: MultiAgentEnv) -> None:
+        self._env = env
+        self.agents = env.agents
+        self.num_agents = env.num_agents
+
+    def _cast(self, obs: dict) -> dict:
+        return {a: obs[a].astype(jnp.float32) for a in self.agents}
+
+    def reset(self, key):
+        obs, state = self._env.reset(key)
+        return self._cast(obs), state
+
+    def step(self, key, state, actions):
+        obs, state, rewards, dones, info = self._env.step(key, state, actions)
+        return self._cast(obs), state, rewards, dones, info
+
+    def step_env(self, key, state, actions):
+        obs, state, rewards, dones, info = self._env.step_env(key, state, actions)
+        return self._cast(obs), state, rewards, dones, info
+
+    def observation_space(self, agent: str = ""):
+        return self._env.observation_space(agent)
+
+    def action_space(self, agent: str = ""):
+        return self._env.action_space(agent)
+
+    def get_obs(self, state):
+        return self._cast(self._env.get_obs(state))
 
     def __getattr__(self, name):
-        # Delegate any other attribute (e.g. max_steps) to the wrapped env. Guarded so
-        # the wrapped env set in __init__ is found via normal lookup first.
         return getattr(self.__dict__["_env"], name)
 
 
@@ -181,6 +226,30 @@ class AvailActionsWrapper(MultiAgentEnv):
 
     def __getattr__(self, name):
         return getattr(self.__dict__["_env"], name)
+
+
+class HanabiWrapper(AvailActionsWrapper):
+    """Hanabi adapter: avail-actions aliasing **and** action-shape normalisation.
+
+    Hanabi has three jaxmarl 0.0.2 quirks the per-agent IQL loop trips on; this wrapper
+    (plus the loop's reset-based ``obs_dim`` probe) papers over all of them:
+
+    * masks via ``get_legal_moves`` -> aliased to ``get_avail_actions`` (inherited from
+      :class:`AvailActionsWrapper`);
+    * an *empty* ``observation_space()`` shape -> handled by probing obs from a reset;
+    * ``step`` expects each agent's action shaped ``(1,)``, not a scalar -> this wrapper
+      reshapes scalar actions to ``(1,)`` on the way in. (Obs / reward / done come back in
+      the standard per-agent form, so nothing else changes.)
+    """
+
+    def _reshape(self, actions: dict) -> dict:
+        return {a: jnp.reshape(actions[a], (1,)) for a in self.agents}
+
+    def step(self, key, state, actions):
+        return self._env.step(key, state, self._reshape(actions))
+
+    def step_env(self, key, state, actions):
+        return self._env.step_env(key, state, self._reshape(actions))
 
 
 # --------------------------------------------------------------------------- spec
@@ -255,13 +324,19 @@ def _build_overcooked(layout: str = "cramped_room", **kwargs: Any) -> MultiAgent
     return FlatObs(base)
 
 
-def _build_coin_game(**kwargs: Any) -> MultiAgentEnv:
-    return FlatObs(jaxmarl.make("coin_game", **kwargs))
+def _build_coin_game(*_: Any, **__: Any) -> MultiAgentEnv:
+    raise NotImplementedError(
+        "Coin-Game returns ``dones`` as a bare bool and ``rewards`` as a tuple (not the "
+        "per-agent dicts with '__all__' that the IQL loop's rewards[a] / dones['__all__'] "
+        "contract needs), so it requires a bespoke adapter (out of M7 scope). See "
+        "conformal_marl/envs/registry.py."
+    )
 
 
 def _build_hanabi(**kwargs: Any) -> MultiAgentEnv:
-    # Hanabi masks via ``get_legal_moves``; wrap to expose ``get_avail_actions``.
-    return AvailActionsWrapper(jaxmarl.make("hanabi", **kwargs))
+    # Hanabi masks via ``get_legal_moves`` and wants ``(1,)``-shaped actions; the adapter
+    # exposes ``get_avail_actions`` and normalises action shapes.
+    return HanabiWrapper(jaxmarl.make("hanabi", **kwargs))
 
 
 def _build_switch_riddle(**kwargs: Any) -> MultiAgentEnv:
@@ -279,25 +354,38 @@ def _build_storm(*_: Any, **__: Any) -> MultiAgentEnv:
 
 # name -> (builder, partially_observable). ``masks_actions`` / ``obs_dim`` are derived
 # from the *built* env (so they stay correct under overrides), not hardcoded here.
+#
+# Two discrete envs from the registry are deliberately *omitted* because they break the
+# parameter-shared per-agent IQL loop, not because they are continuous:
+#  * ``MPE_simple_speaker_listener_v4`` -- heterogeneous agents (the speaker and listener
+#    have *different* obs/action dims), so the loop's ``jnp.stack`` over agents and its
+#    single shared net do not apply. (The homogeneous MPE envs below are fine.)
+#  * ``LearnedPolicyEnemySMAX`` -- requires a *pretrained* enemy policy + params at
+#    construction (``policy=``, ``params=``); SMAX + HeuristicEnemySMAX already cover the
+#    discrete SMAX catalogue without that dependency.
 _BUILDERS: dict[str, tuple[Callable[..., MultiAgentEnv], bool]] = {
     "simu": (_build_simu, False),
     "MPE_simple_spread_v3": (_build_mpe("MPE_simple_spread_v3"), False),
     "MPE_simple_reference_v3": (_build_mpe("MPE_simple_reference_v3"), False),
-    "MPE_simple_speaker_listener_v4": (_build_mpe("MPE_simple_speaker_listener_v4"), False),
     "SMAX": (_build_smax("SMAX"), True),
     "HeuristicEnemySMAX": (_build_smax("HeuristicEnemySMAX"), True),
-    "LearnedPolicyEnemySMAX": (_build_smax("LearnedPolicyEnemySMAX"), True),
     "overcooked": (_build_overcooked, True),
-    "coin_game": (_build_coin_game, True),
     "hanabi": (_build_hanabi, True),
     "switch_riddle": (_build_switch_riddle, True),
+    # Known-incompatible with the per-agent IQL loop (instantiable only -> raise a clear
+    # NotImplementedError pointing at the reason; never fail deep inside make_train).
+    "coin_game": (_build_coin_game, True),
     "storm": (_build_storm, True),
     "storm_2p": (_build_storm, True),
 }
 
-# Convenience: the subset the IQL loop can actually *run* (everything but STORM).
+# Names whose builders raise NotImplementedError (non-per-agent obs/reward APIs): the IQL
+# loop cannot consume them without a bespoke adapter, deferred from M7.
+INCOMPATIBLE_ENVS: tuple[str, ...] = ("coin_game", "storm", "storm_2p")
+
+# Convenience: the subset the IQL loop can actually instantiate *and run*.
 IN_SCOPE_ENVS: tuple[str, ...] = tuple(
-    n for n in _BUILDERS if n not in ("storm", "storm_2p")
+    n for n in _BUILDERS if n not in INCOMPATIBLE_ENVS
 )
 
 
@@ -357,21 +445,6 @@ def _default_config(spec_name: str, partially_observable: bool, num_actions: int
     )
 
 
-def _probe_shapes(env: MultiAgentEnv) -> tuple[int, int, int]:
-    """``(num_agents, num_actions, obs_dim)`` read off a (wrapped) env via one reset.
-
-    ``obs_dim`` comes from an actual ``reset`` rather than ``observation_space`` because
-    some jaxmarl 0.0.2 envs (Hanabi) return an empty-shaped observation space. The reset
-    is cheap and run once, outside any traced training code.
-    """
-    agents = list(env.agents)
-    a0 = agents[0]
-    num_actions = int(env.action_space(a0).n)
-    obs, _ = env.reset(jax.random.PRNGKey(0))
-    obs_dim = int(np.prod(np.asarray(obs[a0]).shape))
-    return len(agents), num_actions, obs_dim
-
-
 def make_env(name: str, config_overrides: dict | None = None, **env_kwargs: Any):
     """Build a ready-to-train env and its :class:`EnvSpec`.
 
@@ -404,8 +477,18 @@ def make_env(name: str, config_overrides: dict | None = None, **env_kwargs: Any)
     builder, partially_observable = _BUILDERS[name]
     env = builder(**env_kwargs)
 
-    num_agents, num_actions, obs_dim = _probe_shapes(env)
-    masks_actions = hasattr(env, "get_avail_actions")
+    # Cast integer observations (Switch-Riddle int32, etc.) to float32 so they match the
+    # float32 buffer schema and the LogWrapper dtype assertion. FlatObs-wrapped envs are
+    # already float, so this is a no-op for them.
+    obs0, _ = env.reset(jax.random.PRNGKey(0))
+    if not jnp.issubdtype(jnp.asarray(obs0[env.agents[0]]).dtype, jnp.floating):
+        env = CastObs(env)
+
+    # Read shapes via the IQL loop's own metadata reader, so the spec and the loop agree
+    # exactly (obs_dim probed from a reset -> robust to Hanabi's empty obs space).
+    info = get_env_info(env)
+    num_agents, num_actions, obs_dim = info.num_agents, info.num_actions, info.obs_dim
+    masks_actions = info.has_avail_actions
 
     cfg = _default_config(name, partially_observable, num_actions)
     if config_overrides:

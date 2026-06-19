@@ -54,15 +54,13 @@ import jax.numpy as jnp
 import numpy as np
 import optax
 
-import jaxmarl
-from jaxmarl.environments.overcooked import overcooked_layouts
-
 from conformal_marl.conformal import conformal_p_values, policy_scores
 from conformal_marl.controller import (
     drift_rate_to_half_life,
     ewma_logwealth_slope,
     staleness_weight,
 )
+from conformal_marl.envs.registry import make_env
 from conformal_marl.iql import get_env_info, make_train
 from conformal_marl.martingale import run_martingale
 from conformal_marl.networks import QNetwork
@@ -72,7 +70,6 @@ from detection_benchmark import td_errors_under_policy  # noqa: E402
 from drift_demo import (  # noqa: E402
     BEHAVIOUR_EPS,
     SCORE_EPS,
-    FlatObs,
     collect_stream,
     least_likely_action,
     make_constant_partner_params,
@@ -122,8 +119,7 @@ def _refit_td(params0, net, hidden_dim, buffer, weights_T, target_batch, gamma,
 
 def run_seed(seed, layout="cramped_room", pre_len=150, post_len=150, refit_steps=300):
     """One closed-loop seed: build the mixed buffer, get H from Channel B, compare fits."""
-    base = jaxmarl.make("overcooked", layout=overcooked_layouts[layout])
-    env = FlatObs(base)
+    env, _ = make_env("overcooked", layout=layout)
     info = get_env_info(env)
     hd = 64
     net = QNetwork(action_dim=info.num_actions, hidden_dim=hd)

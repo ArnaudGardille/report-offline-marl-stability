@@ -41,6 +41,9 @@ packages = ["conformal_marl"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "slow: heavier env-factory runs (large-obs SMAX, etc.); still instantiate in CI but the make_train run is opt-in via -m slow",
+]
 
 [tool.ruff]
 target-version = "py312"
