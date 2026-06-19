@@ -82,6 +82,15 @@ class SamplerContext:
     gamma: float = struct.field(pytree_node=False, default=0.99)
     epsilon: Any = None  # current annealed eps-greedy rate (scalar array) or None
     cal_batch: Any = None  # fresh held-out calibration Transition batch (n, ...) or None
+    # M6' support-floor: epsilon-mixing of the conformal *selection* distribution with a
+    # uniform floor, used by the support-floored samplers below. ``support_floor in
+    # [0, 1)``: the per-transition selection probability is mixed
+    # ``(1 - f) * conformal + f * uniform``, so every in-buffer transition keeps
+    # selection mass >= f / L. This is the constructive ``supp(d_w) >= supp(d^BR)``
+    # guarantee of the support-starvation theorem (condition (b)). ``0.0`` -> the M3
+    # samplers' pure top-p selection (no floor). Static (controls a traced computation
+    # but is itself a Python float).
+    support_floor: float = struct.field(pytree_node=False, default=0.0)
 
 
 def register_sampler(name: str) -> Callable[[Sampler], Sampler]:
@@ -240,4 +249,151 @@ def exact_ratio_sampler(
 
     return _conformal_select(
         buffer, buffer_state, rng, ctx, batch_size, exact_scores
+    )
+
+
+# ------------------------------------------------------------------------ M6'
+# Support-floored conformal selection -- the constructive side of the
+# support-starvation theorem. The M3 selectors above drive the all-attack mass to 0
+# because those rare transitions get tiny p-values and the pure top-p Gumbel subsample
+# never keeps them (support starvation, condition (b) of the theorem violated). These
+# samplers add an epsilon-mixing **support floor**: the selection distribution is
+# ``(1 - f) * softmax(conformal log-p) + f * uniform``, so every in-buffer transition --
+# including all-attack -- retains selection probability >= f / L. That guarantees
+# ``supp(d_w) >= supp(d_buffer) >= supp(d^BR)``.
+#
+# Condition (a) of the theorem -- weights must be the *exact* importance ratio rho -- is
+# the second knob, the loss weighting:
+#   * ``exact_ratio_floor``  : weights = rho_a = exp(-A^exact_a) (exact IS correction);
+#   * ``policy_floor``       : weights = the ratio-free p-values (NOT rho).
+# Together with the floor on/off this lets the demo pin the "iff": only
+# exact-rho + floor recovers the best response; dropping either collapses.
+
+
+def _floored_log_select_weights(
+    log_p_L: chex.Array, floor: float
+) -> chex.Array:
+    """Mix a conformal log-selection score with a uniform floor, in log space.
+
+    Given per-transition conformal log-scores ``log_p_L`` (here ``sum_a log p_i,a``),
+    returns ``log( (1 - f) * softmax(log_p_L) + f * (1/L) )`` -- the log-weights whose
+    Gumbel-top-k draws from the **epsilon-mixed** selection distribution. With ``f > 0``
+    every transition has weight ``>= f / L`` so no transition can be starved out of the
+    batch (the support-floor guarantee). ``f = 0`` returns ``log_p_L`` unchanged (a
+    monotone shift of softmax has identical Gumbel-top-k law), i.e. the M3 behaviour.
+    """
+    if floor <= 0.0:
+        return log_p_L
+    length = log_p_L.shape[0]
+    log_softmax_L = jax.nn.log_softmax(log_p_L)  # normalised conformal selection (log)
+    log_uniform = -jnp.log(jnp.asarray(length, dtype=log_p_L.dtype))  # log(1/L)
+    log_floor = jnp.log(jnp.asarray(floor, dtype=log_p_L.dtype)) + log_uniform
+    log_keep = jnp.log1p(-jnp.asarray(floor, dtype=log_p_L.dtype)) + log_softmax_L
+    # log( (1-f) softmax + f/L ) = logaddexp( log_keep , log_floor ).
+    return jnp.logaddexp(log_keep, log_floor)
+
+
+def _conformal_select_floor(
+    buffer: Any,
+    buffer_state: Any,
+    rng: chex.PRNGKey,
+    ctx: SamplerContext,
+    batch_size: int,
+    score_fn: Callable,
+    rho_weights: bool,
+) -> tuple[Transition, chex.Array, dict]:
+    """Support-floored conformal selection with selectable loss weighting.
+
+    Same LaBER skeleton as :func:`_conformal_select`, with two changes that realise the
+    theorem's two conditions:
+
+    * **Selection** uses :func:`_floored_log_select_weights` with ``ctx.support_floor``
+      (condition (b): guaranteed support coverage).
+    * **Weighting** is either the exact importance ratio ``rho_a = exp(-A^exact_a)``
+      (``rho_weights=True``; condition (a)) or the ratio-free p-values
+      (``rho_weights=False``; the "drop the exact ratio" ablation).
+    """
+    from conformal_marl.conformal import (
+        conformal_p_values,
+        exact_scores,
+        gumbel_top_k,
+        tree_index,
+    )
+
+    rng_draw, rng_sel = jax.random.split(rng)
+    sample = buffer.sample(buffer_state, rng_draw)
+    large: Transition = sample.experience  # (L, N, ...)
+
+    params = ctx.online_params
+    eps = ctx.epsilon
+    scores_LN = score_fn(large, params, ctx.apply_fn, eps, ctx.hidden_dim)  # (L, N)
+    cal_scores_nN = score_fn(ctx.cal_batch, params, ctx.apply_fn, eps, ctx.hidden_dim)
+    p_LN = conformal_p_values(scores_LN, cal_scores_nN)  # (L, N) in (0, 1]
+
+    log_p_L = jnp.sum(jnp.log(p_LN), axis=-1)  # (L,)
+    log_sel_L = _floored_log_select_weights(log_p_L, ctx.support_floor)
+    idx_B = gumbel_top_k(log_sel_L, batch_size, rng_sel)  # (B,) distinct indices
+
+    batch: Transition = tree_index(large, idx_B)
+
+    if rho_weights:
+        # Exact importance ratio rho_a = exp(-A^exact_a) per agent, on the kept batch.
+        # Reuse the exact score so this is exactly Foerster's other-agent ratio. Clip the
+        # log to keep the weight finite (a stale transition can have rho ~ 0; a huge rho
+        # is capped so a single sample cannot dominate the self-normalised loss).
+        exact_LN = exact_scores(large, params, ctx.apply_fn, eps, ctx.hidden_dim)  # (L,N)
+        rho_LN = jnp.exp(jnp.clip(-exact_LN, -20.0, 20.0))
+        weights_BN = rho_LN[idx_B]  # (B, N)
+    else:
+        weights_BN = p_LN[idx_B]  # (B, N) ratio-free p-value weights
+
+    info = {
+        "p_values": p_LN,
+        "selected_p": p_LN[idx_B],
+        "mean_p": jnp.mean(p_LN),
+    }
+    return batch, weights_BN, info
+
+
+@register_sampler("exact_ratio_floor")
+def exact_ratio_floor_sampler(
+    buffer: Any,
+    buffer_state: Any,
+    rng: chex.PRNGKey,
+    ctx: SamplerContext,
+    batch_size: int,
+) -> tuple[Transition, chex.Array, dict]:
+    """Exact-ratio score + support floor + exact-rho loss weights (both theorem conditions).
+
+    The *recovering* configuration of the support-starvation theorem: conformal selection
+    floored so the best-response support is never starved (condition (b)) **and** the loss
+    reweighted by the exact importance ratio ``rho`` (condition (a)). The demo shows this
+    recovers the true best response on Simultaneous-Attack (return -> 1).
+    """
+    from conformal_marl.conformal import exact_scores
+
+    return _conformal_select_floor(
+        buffer, buffer_state, rng, ctx, batch_size, exact_scores, rho_weights=True
+    )
+
+
+@register_sampler("policy_floor")
+def policy_floor_sampler(
+    buffer: Any,
+    buffer_state: Any,
+    rng: chex.PRNGKey,
+    ctx: SamplerContext,
+    batch_size: int,
+) -> tuple[Transition, chex.Array, dict]:
+    """Ratio-free score + support floor, but ratio-free (NOT rho) loss weights.
+
+    The "drop the exact ratio" ablation: the support floor is present (condition (b)
+    holds) but the weights are the ratio-free p-values, so condition (a) fails. Per the
+    theorem this should still miss the true best response -- isolating that the support
+    floor alone is not sufficient; the exact ratio is also required.
+    """
+    from conformal_marl.conformal import policy_scores
+
+    return _conformal_select_floor(
+        buffer, buffer_state, rng, ctx, batch_size, policy_scores, rho_weights=False
     )

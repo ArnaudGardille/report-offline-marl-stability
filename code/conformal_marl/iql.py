@@ -108,6 +108,13 @@ class IQLConfig:
     # buffer scores are ranked into p-values. Ignored by the ``uniform`` sampler.
     # Must be <= steps_per_update() (one collection chunk).
     cal_size: int = 64
+    # M6' support floor: epsilon-mixing of the conformal *selection* distribution with a
+    # uniform floor (only used by the ``*_floor`` samplers). 0.0 -> no floor (the M3
+    # samplers' pure top-p selection). A value f in (0, 1) guarantees every in-buffer
+    # transition keeps selection mass >= f / L, i.e. supp(d_w) >= supp(d^BR) -- the
+    # constructive support condition of the support-starvation theorem. Ignored by
+    # samplers that do not read it.
+    support_floor: float = 0.0
 
     # --- evaluation ---
     eval_episodes: int = 32  # parallel greedy eval episodes
@@ -118,6 +125,15 @@ class IQLConfig:
     # (return-vs-steps with inter-seed bands). Off by default to keep the fast
     # learning test (which only needs start/end) cheap.
     eval_during_training: bool = False
+    # M6' support-starvation diagnostic. When True the loop records, each outer
+    # iteration, the fraction of the *sampled training batch* whose joint action is the
+    # all-attack action (every agent took action index 1). This is the empirical
+    # effective-replay (visitation) mass d_w places on the best-response support -- the
+    # quantity the support-starvation demo plots per sampler. Averaged over the
+    # iteration's gradient steps; returned as ``all_attack_frac`` of shape
+    # ``(num_updates,)``. Off by default (the metric is 0.0). Specific to a 2-action
+    # all-attack-optimal env (Simultaneous-Attack); meaningless elsewhere.
+    track_batch_action_stats: bool = False
 
     def draw_batch_size(self) -> int:
         """Number of items the buffer draws per sample (LaBER's ``L``).
@@ -412,6 +428,7 @@ def make_train(config: IQLConfig, env: Any) -> Callable[[chex.PRNGKey], dict]:
                 gamma=cfg.gamma,
                 epsilon=_epsilon_by_step(step, cfg),
                 cal_batch=cal_batch,
+                support_floor=cfg.support_floor,
             )
 
             def _grad_step(lstate, _):
@@ -425,13 +442,21 @@ def make_train(config: IQLConfig, env: Any) -> Callable[[chex.PRNGKey], dict]:
                     loss, grads = jax.value_and_grad(_loss_fn)(
                         ts.params, target_params, batch, weights
                     )
-                    return ts.apply_gradients(grads=grads), loss
+                    # Support-starvation diagnostic: fraction of the *trained* batch whose
+                    # joint action is all-attack (every agent action == 1). This is the
+                    # mass the effective replay distribution d_w puts on the BR support.
+                    all_attack = jnp.mean(
+                        jnp.all(batch.actions == 1, axis=-1).astype(jnp.float32)
+                    )
+                    return ts.apply_gradients(grads=grads), loss, all_attack
 
                 def _skip_learn(_):
-                    return ts, jnp.array(0.0)
+                    return ts, jnp.array(0.0), jnp.array(0.0)
 
                 can_learn = buffer.can_sample(buffer_state)
-                new_ts, loss = jax.lax.cond(can_learn, _do_learn, _skip_learn, None)
+                new_ts, loss, all_attack = jax.lax.cond(
+                    can_learn, _do_learn, _skip_learn, None
+                )
                 new_updates = updates + can_learn.astype(jnp.int32)
 
                 # Hard/Polyak target update on the gradient-step cadence.
@@ -444,9 +469,9 @@ def make_train(config: IQLConfig, env: Any) -> Callable[[chex.PRNGKey], dict]:
                     lambda _: target_params,
                     operand=None,
                 )
-                return (new_ts, new_target, new_updates, rng), loss
+                return (new_ts, new_target, new_updates, rng), (loss, all_attack)
 
-            (ts, new_target, updates, rng), losses = jax.lax.scan(
+            (ts, new_target, updates, rng), (losses, all_attacks) = jax.lax.scan(
                 _grad_step,
                 (ts, runner["target_params"], runner["updates"], rng),
                 None,
@@ -472,11 +497,20 @@ def make_train(config: IQLConfig, env: Any) -> Callable[[chex.PRNGKey], dict]:
             else:
                 iter_return = jnp.array(0.0)
 
+            # Mean all-attack fraction in the iteration's trained batches (the
+            # support-starvation metric). Cheap (an int compare + mean already computed in
+            # the grad scan); reported only when tracking is on, else folded to 0.0.
+            iter_all_attack = (
+                jnp.mean(all_attacks)
+                if cfg.track_batch_action_stats
+                else jnp.array(0.0)
+            )
             metrics = {
                 "loss": jnp.mean(losses),
                 "epsilon": _epsilon_by_step(step, cfg),
                 "greedy_return": iter_return,
                 "step": step,
+                "all_attack_frac": iter_all_attack,
             }
             return runner, metrics
 
@@ -607,6 +641,9 @@ def make_train(config: IQLConfig, env: Any) -> Callable[[chex.PRNGKey], dict]:
             # sets it); return_steps is always meaningful (cumulative env steps).
             "returns": step_metrics["greedy_return"],
             "return_steps": step_metrics["step"],
+            # Per-iteration all-attack mass in the trained batch (support-starvation
+            # metric); all-zeros unless track_batch_action_stats was set.
+            "all_attack_frac": step_metrics["all_attack_frac"],
         }
 
     return train
