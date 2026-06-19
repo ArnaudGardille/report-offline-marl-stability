@@ -44,6 +44,10 @@ on Autonomous Agents and Multiagent Systems (AAMAS 2024)}{May 6 -- 10, 2024}
 \newcommand{\indic}[1]{\mathbf{1}\!\left[#1\right]}
 \DeclareMathOperator*{\argmax}{arg\,max}
 \DeclareMathOperator{\supp}{supp}
+\newcommand{\KL}{\mathrm{KL}}
+\newcommand{\dTV}{d_{\mathrm{TV}}}
+\newcommand{\Dw}{D_{w}}
+\newcommand{\dw}{d_{w}}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -531,6 +535,92 @@ Otherwise the threshold is tuned on nominal trajectories for an acceptable
 empirical false-alarm rate. We report which regime we are in rather than claiming
 the strongest one by default.
 
+\subsection{Theoretical analysis: when selection starves, and how detection
+certifies it}
+\label{sec:theory}
+We make two things precise: \emph{(i)}~why biasing replay towards
+currently-compatible transitions can move the learned fixed point \emph{away}
+from the best response, and \emph{(ii)}~in what sense the test martingale of
+Section~\ref{sec:detection} \emph{certifies} the selection rule of
+Section~\ref{sec:selection}.
+
+\paragraph{Setup.} Fix $\picur$, so the perceived MDP $\mathcal{M}_a(\picur)$ is
+stationary (Appendix~\ref{app:br}). Use linear features
+$Q_\theta(s,u_a)=\phi(s,u_a)^\top\theta$ with $\Phi$ of full column rank, a buffer
+measure $\mu$ over $(s,u_a)$, and conformal weights $w_i=g(p_i)\ge0$ (soft
+$w_i\propto p_i$, or the hard filter $w_i=\indic{p_i\ge\alpha}$). Write the
+effective sampling measure $\dw\propto w\cdot\mu$, $\Dw=\mathrm{diag}(\dw)$, the
+perceived transition matrix $P^{\picur}$, and the $\Dw$-weighted projection
+$\Pi_{\Dw}=\Phi(\Phi^\top\Dw\Phi)^{-1}\Phi^\top\Dw$.
+
+\begin{proposition}[Reweighted fixed point]
+\label{prop:fixedpoint}
+If $A_w:=\Phi^\top\Dw(I-\gamma P^{\picur})\Phi$ is nonsingular, conformal-reweighted
+semi-gradient TD converges to the unique $\theta_w=A_w^{-1}b_w$, with
+$b_w=\Phi^\top\Dw\,\bar r^{\picur}$, solving the projected equation
+$\Phi\theta_w=\Pi_{\Dw}\,\Bop^{\mathrm{BR}}_{\picur}(\Phi\theta_w)$. The operator
+$\Pi_{\Dw}\Bop^{\mathrm{BR}}_{\picur}$ is a $\gamma$-contraction in
+$\lVert\cdot\rVert_{\Dw}$ iff $\dw$ is stationary for $P^{\picur}$; conformal
+reweighting deliberately violates this, so contraction---and hence boundedness of
+the off-distribution fixed point~\citep{kolter2011fixed}---is not
+guaranteed~\citep{tsitsiklis1997analysis}.
+\end{proposition}
+
+\begin{theorem}[Support starvation]
+\label{thm:starvation}
+Let $\mathcal{S}_w=\supp(\dw)\subseteq\supp(\mu)=\mathcal{S}$.
+\emph{(i)}~$\theta_w$ depends on $\mathcal{M}_a(\picur)$ only through transitions in
+$\mathcal{S}_w$ (entries of $A_w,b_w$ outside $\mathcal{S}_w$ vanish).
+\emph{(ii)}~Hence $\Phi\theta_w$ is the best response of the sub-MDP restricted to
+$\mathcal{S}_w$; if an optimal best-response trajectory visits some
+$(s,u_a)\notin\mathcal{S}_w$, the greedy policy of $\theta_w$ can be arbitrarily
+suboptimal in $\mathcal{M}_a(\picur)$.
+\emph{(iii)}~The hard filter $w_i=\indic{p_i\ge\alpha}$ deletes from $\mathcal{S}_w$
+every stored $(s,u_a)$ whose $\umai$ is improbable under $\picur$; when the
+reward-bearing optimal joint action is currently low-probability (exploration, or
+escaping a poor consensus) it is deleted and (ii) applies. Conversely, with the
+exact score $A=-\log\rho$ and soft weights $w_i\propto\rho_i$ (no truncation),
+$\dw\propto\rho\cdot\mu$ restores the unbiased current perceived kernel---the
+importance correction of \citet{foerster2017stabilising}---so
+$\mathcal{S}_w=\mathcal{S}$ and $\theta_w$ targets $\Qbr(\cdot;\picur)$.
+\end{theorem}
+\noindent\emph{Proof: Appendix~\ref{app:starvation}.} The theorem delimits the
+\emph{safe regime} of conformal selection---soft, exact-ratio reweighting (which
+recovers \citealp{foerster2017stabilising}) with full support coverage. Outside
+it---ratio-free scores~\eqref{eq:score-policy} or hard
+$\alpha$-filtering---selection optimises a starved objective.
+
+\paragraph{Remark (the Simultaneous-Attack collapse).} In Simultaneous-Attack
+(single state; Section~\ref{sec:experiments}) the all-attack joint action is the
+only reward-bearing event. Once the iterate drifts towards all-abstain, $\picur$
+renders all-attack improbable, the filter zeroes its weight, the rare exploratory
+transitions leave $\mathcal{S}_w$, and by Theorem~\ref{thm:starvation}(iii)
+learning locks onto the all-abstain consensus---predicting precisely the regime in
+which compatibility selection underperforms uniform replay.
+
+\begin{lemma}[Detection certifies selection]
+\label{lem:certify}
+Run the martingale of Section~\ref{sec:detection} on the \emph{same} score $A$ as
+the selector, with fixed weights $\tilde w_i$. If on the current window the
+$p$-values are i.i.d.\ with density $q$ under drift (uniform under $H_0$), the
+beyond-exchangeability coverage gap of the selector~\citep{barber2023beyond} obeys
+\[
+\Delta_{\mathrm{cov}}\ \le\ \sum_i\tilde w_i\,
+\dTV\!\big(\mathbb{P}^{\mathrm{cur}}_A,\mathbb{P}^{\mathrm{past}}_A\big)\ \le\
+\Big(\textstyle\sum_i\tilde w_i\Big)\sqrt{\tfrac12\,\widehat{\KL}_t},
+\]
+where $\widehat{\KL}_t=\tfrac1t\log M_t\xrightarrow{\ a.s.\ }\KL(q\,\|\,\mathrm{Unif})$
+is the martingale's asymptotic log-growth rate (attained by the log-optimal bet; a
+mixture attains it up to $O(t^{-1}\log t)$).
+\end{lemma}
+\noindent\emph{Proof: Appendix~\ref{app:certify}.} The first inequality holds
+because the conformal procedure is measurable w.r.t.\ the scores; the second is
+Pinsker. The certificate is valid at the score level in every regime; it equals
+the perceived-MDP drift---hence is tight---iff $A=-\log\rho$, a sufficient
+statistic of $\pipast\!\to\!\picur$. Thus the anytime-valid drift detector supplies
+a running upper bound on the (only marginally valid) selector's miscoverage:
+\emph{detection certifies selection}.
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Experiments}
 \label{sec:experiments}
@@ -776,6 +866,52 @@ uniform). Mixing over $\varepsilon$ preserves this. Ville's
 inequality~\cite{ville1939etude} for non-negative supermartingales gives
 $\mathbb{P}_{H_0}(\sup_{t}M_t\ge1/\delta)\le\mathbb{E}[M_0]\,\delta=\delta$,
 which is \eqref{eq:ville} and justifies the anytime threshold $M_t\ge1/\delta$.
+
+\section{Proof of Theorem~\ref{thm:starvation} (support starvation)}
+\label{app:starvation}
+\emph{(i)} Both $A_w=\Phi^\top\Dw(I-\gamma P^{\picur})\Phi$ and
+$b_w=\Phi^\top\Dw\,\bar r^{\picur}$ carry $\Dw=\mathrm{diag}(\dw)$ as a left
+factor; any $(s,u_a)$ with $\dw(s,u_a)=0$ contributes a zero row to $\Dw$ and so
+does not enter $A_w$ or $b_w$. Hence $\theta_w$ is a function of
+$\{P^{\picur},\bar r^{\picur}\}$ restricted to $\mathcal{S}_w$ alone.
+\emph{(ii)} On $\mathcal{S}_w$ the normal equation $A_w\theta_w=b_w$ is exactly the
+$\Dw$-weighted projected Bellman equation of the sub-MDP that retains only
+state-actions in $\mathcal{S}_w$, whose solution is that sub-MDP's best-response
+value. Two perceived MDPs that agree on $\mathcal{S}_w$ but differ on
+$\mathcal{S}\setminus\mathcal{S}_w$ yield identical $A_w,b_w$, hence identical
+$\theta_w$, while their true $\Qbr$ differ; choosing the off-support values so that
+an omitted action is optimal makes $\argmax_{u_a}\phi(s,u_a)^\top\theta_w$
+suboptimal, with a gap as large as the reward range permits.
+\emph{(iii)} For the hard filter $\dw(s,u_a)\propto\mu(s,u_a)\,\indic{p\ge\alpha}$,
+and $p$ is small exactly when $\umai$ is improbable under $\picur$ (small
+$\picur(\umai\mid s)$, large score $A$); such pairs receive $\dw=0$ and leave
+$\mathcal{S}_w$. The converse follows because, with $A=-\log\rho$ and
+$w_i\propto\rho_i$, $\dw\propto\rho\cdot\mu=\tfrac{\picur}{\pipast}\mu$ undoes the
+change of measure on $\uma$, leaving the unbiased current perceived kernel, on
+which the ordinary contraction of Appendix~\ref{app:br} applies; then
+$\mathcal{S}_w=\mathcal{S}$ and $\theta_w$ targets $\Qbr(\cdot;\picur)$.
+
+\section{Proof of Lemma~\ref{lem:certify} (detection certifies selection)}
+\label{app:certify}
+Let $F_{\mathrm{past}}$ be the past score CDF used to form the $p$-values, so
+$p=1-F_{\mathrm{past}}(A)$ is a monotone probability integral transform: under
+$H_0$, $p\sim\mathrm{Unif}[0,1]$; under drift its law has density $q$. As KL and
+total variation are invariant under the invertible map $A\mapsto p$,
+$\KL(q\,\|\,\mathrm{Unif})=\KL(\mathbb{P}^{\mathrm{cur}}_A\,\|\,\mathbb{P}^{\mathrm{past}}_A)$
+and $\dTV(q,\mathrm{Unif})=\dTV(\mathbb{P}^{\mathrm{cur}}_A,\mathbb{P}^{\mathrm{past}}_A)$.
+The conformal selector is a function of the scores alone, so its coverage depends
+on the data only through the score law; the beyond-exchangeability bound of
+\citet{barber2023beyond},
+$\text{coverage}\ge1-\alpha-\sum_i\tilde w_i\,\dTV(Z,Z^{(i)})$, may therefore be
+evaluated with the score-level TV, giving the first inequality. Pinsker's
+inequality $\dTV\le\sqrt{\tfrac12\KL}$ with the identity above gives the second.
+Finally $\tfrac1t\log M_t=\tfrac1t\sum_{j\le t}\log g(p_j)\to\mathbb{E}_q[\log g(p)]$
+a.s.\ (SLLN); the log-optimal bet $g=q$ attains
+$\mathbb{E}_q[\log(q/1)]=\KL(q\,\|\,\mathrm{Unif})$, and the $\varepsilon$-mixture
+\eqref{eq:martingale} attains it up to an $O(t^{-1}\log t)$ penalty. The estimate
+is asymptotic, not anytime-valid; the alarm~\eqref{eq:ville} remains the
+anytime-valid object. Tightness against the \emph{perceived-MDP} drift requires
+$A$ to be a sufficient statistic of $\pipast\!\to\!\picur$, i.e.\ $A=-\log\rho$.
 
 \end{document}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%

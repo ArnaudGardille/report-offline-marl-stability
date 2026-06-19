@@ -2,7 +2,7 @@
 %%% Do NOT edit. File created by BibTeX with style
 %%% ACM-Reference-Format-Journals [18-Jan-2012].
 
-\begin{thebibliography}{17}
+\begin{thebibliography}{20}
 
 %%% ====================================================================
 %%% NOTE TO THE USER: you can override these defaults by providing
@@ -49,6 +49,20 @@
 \newblock
 
 
+\bibitem[\protect\citeauthoryear{Barber, Cand{\`e}s, Ramdas, and
+  Tibshirani}{Barber et~al\mbox{.}}{2023}]%
+        {barber2023beyond}
+\bibfield{author}{\bibinfo{person}{Rina~Foygel Barber},
+  \bibinfo{person}{Emmanuel~J. Cand{\`e}s}, \bibinfo{person}{Aaditya Ramdas},
+  {and} \bibinfo{person}{Ryan~J. Tibshirani}.} \bibinfo{year}{2023}\natexlab{}.
+\newblock \showarticletitle{Conformal Prediction Beyond Exchangeability}.
+\newblock \bibinfo{journal}{\emph{The Annals of Statistics}}
+  \bibinfo{volume}{51}, \bibinfo{number}{2} (\bibinfo{year}{2023}),
+  \bibinfo{pages}{816--845}.
+\newblock
+\showeprint[arxiv]{2202.13415}~[stat.ME]
+
+
 \bibitem[\protect\citeauthoryear{Foerster, Nardelli, Farquhar, Afouras, Torr,
   Kohli, and Whiteson}{Foerster et~al\mbox{.}}{2017}]%
         {foerster2017stabilising}
@@ -62,6 +76,16 @@
   Conference on Machine Learning (ICML)}}.
 \newblock
 \showeprint[arxiv]{1702.08887}~[cs.AI]
+
+
+\bibitem[\protect\citeauthoryear{Kolter}{Kolter}{2011}]%
+        {kolter2011fixed}
+\bibfield{author}{\bibinfo{person}{J.~Zico Kolter}.}
+  \bibinfo{year}{2011}\natexlab{}.
+\newblock \showarticletitle{The Fixed Points of Off-Policy {TD}}. In
+  \bibinfo{booktitle}{\emph{Advances in Neural Information Processing Systems
+  (NeurIPS)}}.
+\newblock
 
 
 \bibitem[\protect\citeauthoryear{Lahire, Geist, and Rachelson}{Lahire
@@ -209,6 +233,22 @@
   Reinforcement Learning}.
 \newblock
 \showeprint[arxiv]{1511.08779}~[cs.AI]
+
+
+\bibitem[\protect\citeauthoryear{Tsitsiklis and Roy}{Tsitsiklis and
+  Roy}{1997}]%
+        {tsitsiklis1997analysis}
+\bibfield{author}{\bibinfo{person}{John~N. Tsitsiklis} {and}
+  \bibinfo{person}{Benjamin~Van Roy}.} \bibinfo{year}{1997}\natexlab{}.
+\newblock \showarticletitle{An Analysis of Temporal-Difference Learning with
+  Function Approximation}.
+\newblock \bibinfo{journal}{\emph{IEEE Trans. Automat. Control}}
+  \bibinfo{volume}{42}, \bibinfo{number}{5} (\bibinfo{year}{1997}),
+  \bibinfo{pages}{674--690}.
+\newblock
+\urldef\tempurl%
+\url{https://doi.org/10.1109/9.580874}
+\showDOI{\tempurl}
 
 
 \bibitem[\protect\citeauthoryear{Ville}{Ville}{1939}]%
