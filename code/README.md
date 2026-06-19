@@ -9,10 +9,11 @@ The project implements two algorithms on top of an IQL backbone:
    current policies, and
 2. a **conformal test-martingale drift detector**.
 
-> **Status — Milestone M0 (project scaffold only).**
-> This milestone sets up the uv project and a working Python / JAX / JaxMARL
-> environment. No algorithm logic exists yet; feature modules land in later
-> milestones.
+> **Status — Milestone M2 (IQL training backbone).**
+> The uv project, the Simultaneous-Attack env (M1), and the IQL backbone (M2) are
+> in place. M2 adds a pure-functional, jit+vmap-able IQL loop with a flashbax
+> replay buffer, a recurrence-ready Q-network interface, and a swappable-sampler
+> seam that later milestones (conformal selection / drift detection) plug into.
 
 ## Layout
 
@@ -21,10 +22,57 @@ code/
 ├── pyproject.toml          # uv project, requires-python >=3.12,<3.13
 ├── README.md               # this file
 ├── conformal_marl/
-│   └── __init__.py         # package marker + __version__ = "0.0.0"
+│   ├── __init__.py         # package marker + __version__ = "0.0.0"
+│   ├── envs/
+│   │   └── simultaneous_attack.py   # M1: 1-step cooperative coordination bandit
+│   ├── networks.py         # M2: recurrence-ready Q-network (FF cell + GRU drop-in)
+│   ├── replay.py           # M2: Transition schema + flashbax item buffer
+│   ├── samplers.py         # M2: swappable sampler seam (registry + `uniform`)
+│   └── iql.py              # M2: pure-functional IQL (make_train -> train(rng))
+├── scripts/
+│   └── train.py            # M2: CLI trainer (Simu / simple_spread, multi-seed)
 └── tests/
     ├── __init__.py
-    └── test_smoke.py       # toolchain smoke tests (jit/vmap + JaxMARL reset)
+    ├── test_smoke.py            # toolchain smoke tests (jit/vmap + JaxMARL)
+    ├── test_simultaneous_attack.py  # M1 reward-correctness + interface tests
+    └── test_iql_learns.py       # M2 fast learning test + vmap/sampler/schema checks
+```
+
+## M2 — IQL backbone
+
+`conformal_marl.iql.make_train(config, env)` returns a pure `train(rng) -> metrics`
+closure: the whole run is a `jax.lax.scan`, `jax.jit`-compiled and `jax.vmap`-able
+over a batch of seeds. Collection follows the PureJaxRL pattern (step `num_envs`
+parallel envs for `num_steps`, then do `num_grad_steps` gradient updates, scanning
+`num_updates` times) so compile cost scales with the chunk length, not the total
+budget.
+
+Key pieces and their extension points:
+
+- **Network** (`networks.py`): every Q-net speaks the recurrent contract
+  `apply(params, carry, (obs, resets)) -> (carry, q)` plus `initialize_carry`. The
+  default `QNetwork` is a feed-forward MLP whose carry is a zero-width placeholder
+  threaded unchanged; `GRUQNetwork` is a committed, same-signature recurrent
+  drop-in for M5 (SMAX / Overcooked).
+- **Transition schema** (`replay.py`): per-agent `obs`/`next_obs`, the **joint**
+  `actions` (so other agents' actions `u_{-a}` are recoverable), per-agent
+  `reward`/`done`, `avail_actions` mask, and the per-agent epsilon-greedy
+  **`behavior_log_prob`** of the taken action — over-provisioned so M3/M5 never
+  change the buffer format.
+- **Sampler seam** (`samplers.py`): `sampler(buffer, buffer_state, rng, ctx,
+  batch_size) -> (batch, weights, info)`, registered by name. `uniform` returns
+  unit weights; the TD loss multiplies the per-sample squared error by `weights`.
+  `ctx` (a `SamplerContext`) carries online/target params, the network apply fn,
+  and env metadata, and the loop supports drawing `L` then training on `B<=L`
+  (LaBER-style) — so M3 can add `conformal_policy` / `exact_ratio` samplers
+  **without editing the training loop**.
+
+Run real trainings (bigger than the committed fast test):
+
+```bash
+uv run python scripts/train.py --env simu   --seeds 8   # Simultaneous-Attack N=2
+uv run python scripts/train.py --env spread --seeds 3   # MPE simple_spread
+uv run python scripts/train.py --env both
 ```
 
 ## Requirements
