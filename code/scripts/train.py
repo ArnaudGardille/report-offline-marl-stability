@@ -19,9 +19,7 @@ import time
 import jax
 import jax.numpy as jnp
 
-import jaxmarl
-
-from conformal_marl.envs.simultaneous_attack import SimultaneousAttack
+from conformal_marl.envs.registry import make_env
 from conformal_marl.iql import IQLConfig, get_env_info, make_train
 from conformal_marl.networks import QNetwork
 
@@ -140,14 +138,16 @@ def main() -> None:
         cfg.sampler_name = args.sampler
         if args.timesteps:
             cfg.total_timesteps = args.timesteps
-        run_env("Simultaneous-Attack (N=2)", SimultaneousAttack(num_agents=2), cfg, args.seeds)
+        env, _ = make_env("simu", num_agents=2)
+        run_env("Simultaneous-Attack (N=2)", env, cfg, args.seeds)
 
     if args.env in ("spread", "both"):
         cfg = spread_config()
         cfg.sampler_name = args.sampler
         if args.timesteps:
             cfg.total_timesteps = args.timesteps
-        run_env("MPE simple_spread", jaxmarl.make("MPE_simple_spread_v3"), cfg, args.seeds)
+        env, _ = make_env("MPE_simple_spread_v3")
+        run_env("MPE simple_spread", env, cfg, args.seeds)
 
 
 if __name__ == "__main__":

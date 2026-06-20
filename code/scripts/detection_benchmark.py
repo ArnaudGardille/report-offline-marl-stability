@@ -68,12 +68,9 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-import jaxmarl
-from jaxmarl.environments.overcooked import overcooked_layouts
-
 from conformal_marl.aes_baseline import aes_detector, reference_stats
 from conformal_marl.conformal import conformal_p_values, policy_scores
-from conformal_marl.envs.simultaneous_attack import SimultaneousAttack
+from conformal_marl.envs.registry import make_env
 from conformal_marl.iql import get_env_info, make_train
 from conformal_marl.martingale import run_martingale
 from conformal_marl.networks import QNetwork
@@ -86,7 +83,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from drift_demo import (  # noqa: E402
     BEHAVIOUR_EPS,
     SCORE_EPS,
-    FlatObs,
     collect_stream,
     least_likely_action,
     make_constant_partner_params,
@@ -218,7 +214,7 @@ def calibrate_on_simu(delta, n_h0, h0_len, seed):
     Overcooked retrains; this policy is Simu-only).
     """
     print("\n========== Simultaneous-Attack false-alarm lab ==========")
-    env = SimultaneousAttack(num_agents=2)
+    env, _ = make_env("simu", num_agents=2)
     info = get_env_info(env)
     hd = 32
     net = QNetwork(action_dim=info.num_actions, hidden_dim=hd)
@@ -325,8 +321,7 @@ def detection_delay_overcooked(calib, delta, seeds, pre_len, post_len, layout="c
     ref_std = calib["aes_ref_std"]
     aes_thr = calib["aes_threshold"]
 
-    base = jaxmarl.make("overcooked", layout=overcooked_layouts[layout])
-    env = FlatObs(base)
+    env, _ = make_env("overcooked", layout=layout)
     info = get_env_info(env)
     hd = 64
     net = QNetwork(action_dim=info.num_actions, hidden_dim=hd)

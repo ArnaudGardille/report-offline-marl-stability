@@ -56,17 +56,18 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-import jaxmarl
-from jaxmarl.environments.multi_agent_env import MultiAgentEnv
-from jaxmarl.environments.overcooked import overcooked_layouts
-from jaxmarl.environments.spaces import Box
-
 from conformal_marl.conformal import conformal_p_values, policy_scores
+from conformal_marl.envs.registry import FlatObs, make_env
 from conformal_marl.envs.simultaneous_attack import SimultaneousAttack
 from conformal_marl.iql import IQLConfig, get_env_info, make_train
 from conformal_marl.martingale import detection_delay, run_martingale
 from conformal_marl.networks import QNetwork
 from conformal_marl.replay import Transition
+
+# ``FlatObs`` now lives in the package (conformal_marl.envs.registry) -- it used to be
+# defined in this file and is imported by the sibling closed_loop_demo / detection_benchmark
+# scripts. Re-export it here so their ``from drift_demo import FlatObs`` keeps working.
+__all__ = ["FlatObs"]
 
 import matplotlib
 
@@ -84,52 +85,6 @@ SCORE_EPS = 0.05
 # Behaviour epsilon while collecting the streamed/calibration rollouts (a little
 # exploration so the calibration set has spread; the swap is the dominant effect).
 BEHAVIOUR_EPS = 0.10
-
-
-class FlatObs(MultiAgentEnv):
-    """Thin JaxMARL wrapper flattening image obs to a 1-D vector (for Overcooked).
-
-    Overcooked hands each agent a 3-D ``(H, W, C)`` observation and its
-    ``observation_space()`` takes no agent argument -- neither of which the M2 IQL MLP
-    backbone (a Dense net over a flat obs vector, with the MPE-style
-    ``observation_space(agent)`` signature) consumes directly. This wrapper flattens the
-    obs and exposes the per-agent ``observation_space(agent)`` signature, so
-    ``make_train`` trains on Overcooked unchanged. (No learning-relevant transform -- a
-    flat MLP over the flattened grid is a valid, if basic, Overcooked Q-net; the demo
-    only needs distinguishable policies and a p-value stream, not state-of-the-art play.)
-    """
-
-    def __init__(self, env: MultiAgentEnv) -> None:
-        self._env = env
-        self.agents = env.agents
-        self.num_agents = env.num_agents
-        flat_dim = int(np.prod(env.observation_space().shape))
-        self._obs_space = Box(-1e9, 1e9, (flat_dim,), dtype=jnp.float32)
-
-    def _flat(self, obs: dict) -> dict:
-        return {a: obs[a].reshape(-1).astype(jnp.float32) for a in self.agents}
-
-    def reset(self, key):
-        obs, state = self._env.reset(key)
-        return self._flat(obs), state
-
-    def step(self, key, state, actions):
-        obs, state, rewards, dones, info = self._env.step(key, state, actions)
-        return self._flat(obs), state, rewards, dones, info
-
-    def step_env(self, key, state, actions):
-        obs, state, rewards, dones, info = self._env.step_env(key, state, actions)
-        return self._flat(obs), state, rewards, dones, info
-
-    def observation_space(self, agent: str = ""):
-        del agent
-        return self._obs_space
-
-    def action_space(self, agent: str = ""):
-        return self._env.action_space(agent)
-
-    def get_obs(self, state):
-        return self._flat(self._env.get_obs(state))
 
 
 # --------------------------------------------------------------------------- scoring
@@ -180,6 +135,9 @@ def collect_stream(env, info, net, p_self, p_partner, key, n_steps, hidden_dim, 
             next_obs=nobs_NA,
             avail_actions=jnp.ones((n_agents, n_act), dtype=jnp.float32),
             behavior_log_prob=jnp.zeros((n_agents,), dtype=jnp.float32),
+            # Feed-forward stream: zero-width recurrent carry placeholders (M7 schema).
+            hidden=jnp.zeros((n_agents, 0), dtype=jnp.float32),
+            next_hidden=jnp.zeros((n_agents, 0), dtype=jnp.float32),
         )
         return (nstate, nobs, rng), tr
 
@@ -398,8 +356,10 @@ def run_overcooked(delta: float, seed: int, layout_name: str = "cramped_room") -
     reproducible version, and the detector is the same either way.)
     """
     print(f"\n========== Overcooked ({layout_name}) controlled partner swap ==========")
-    base = jaxmarl.make("overcooked", layout=overcooked_layouts[layout_name])
-    env = FlatObs(base)
+    # Env via the central factory (flattens Overcooked's image obs through the shared
+    # FlatObs wrapper). We keep this script's own short config below, so behaviour /
+    # figures are unchanged; only the env construction is de-duplicated.
+    env, _ = make_env("overcooked", layout=layout_name)
     info = get_env_info(env)
     hd = 64
     net = QNetwork(action_dim=info.num_actions, hidden_dim=hd)

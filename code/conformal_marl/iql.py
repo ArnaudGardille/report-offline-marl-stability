@@ -48,7 +48,7 @@ from flax.training.train_state import TrainState
 import optax
 from jaxmarl.wrappers.baselines import LogWrapper
 
-from conformal_marl.networks import QNetwork
+from conformal_marl.networks import get_network_cls
 from conformal_marl.replay import Transition, empty_transition, make_replay_buffer
 from conformal_marl.samplers import SamplerContext, get_sampler
 
@@ -74,6 +74,14 @@ class IQLConfig:
     learning_starts: int = 256  # transitions before the first gradient update
 
     # --- network ---
+    # ``"ff"`` (default) -> feed-forward :class:`~conformal_marl.networks.QNetwork`;
+    # ``"gru"`` -> recurrent :class:`~conformal_marl.networks.GRUQNetwork`. The GRU is
+    # wired end-to-end via the R2D2-style *stored hidden state*: the per-agent carry is
+    # threaded through the collection scan (reset on episode ``done``), stored in each
+    # :class:`~conformal_marl.replay.Transition`, and the TD update is a single GRU cell
+    # step from the stored carry (no time-unroll, so no ``nn.scan``). FF leaves the carry
+    # a zero-width placeholder, so the ``"ff"`` path is unchanged.
+    net_type: str = "ff"
     hidden_dim: int = 64
     init_scale: float = 1.0
 
@@ -164,11 +172,19 @@ class EnvInfo:
 
 
 def get_env_info(env: Any) -> EnvInfo:
-    """Pull static shapes/metadata off a (wrapped) JaxMARL env."""
+    """Pull static shapes/metadata off a (wrapped) JaxMARL env.
+
+    ``obs_dim`` is taken from an actual ``reset`` rather than ``observation_space``: some
+    jaxmarl 0.0.2 envs (notably Hanabi) return an *empty-shaped* observation space, whose
+    ``np.prod`` is 1 -- which would mis-size the Q-net's input layer. A single reset is
+    cheap and run once here, outside any traced training code, and is robust for every
+    env the factory builds (the per-agent obs always has the true flat width).
+    """
     agents = list(env.agents)
     a0 = agents[0]
     num_actions = int(env.action_space(a0).n)
-    obs_dim = int(np.prod(env.observation_space(a0).shape))
+    obs0, _ = env.reset(jax.random.PRNGKey(0))
+    obs_dim = int(np.prod(np.asarray(obs0[a0]).shape))
     has_avail = hasattr(env, "get_avail_actions")
     return EnvInfo(
         agents=agents,
@@ -273,11 +289,17 @@ def make_train(config: IQLConfig, env: Any) -> Callable[[chex.PRNGKey], dict]:
     agents = info.agents
     cfg = config
 
-    network = QNetwork(
+    network_cls = get_network_cls(cfg.net_type)
+    network = network_cls(
         action_dim=info.num_actions,
         hidden_dim=cfg.hidden_dim,
         init_scale=cfg.init_scale,
     )
+    # Width of one agent's stored recurrent carry: the GRU's ``hidden_dim``, or 0 for the
+    # feed-forward net (a zero-width placeholder). ``initialize_carry(hidden_dim, 1)`` has
+    # shape ``(1, carry_dim)``; reading its last axis gives the per-agent carry width that
+    # the buffer schema must reserve.
+    carry_dim = int(network_cls.initialize_carry(cfg.hidden_dim, 1).shape[-1])
     buffer = make_replay_buffer(
         max_size=cfg.buffer_size,
         min_size=cfg.learning_starts,
@@ -297,8 +319,8 @@ def make_train(config: IQLConfig, env: Any) -> Callable[[chex.PRNGKey], dict]:
             f"exceed num_envs * num_steps. Lower cal_size or raise num_steps/num_envs."
         )
 
-    def _reset_carry(batch: int) -> chex.Array:
-        return QNetwork.initialize_carry(cfg.hidden_dim, batch)
+    def _reset_carry(*batch_dims: int) -> chex.Array:
+        return network_cls.initialize_carry(cfg.hidden_dim, *batch_dims)
 
     # vmapped (over the parallel-env axis) env reset/step.
     v_reset = jax.vmap(env.reset)
@@ -325,7 +347,7 @@ def make_train(config: IQLConfig, env: Any) -> Callable[[chex.PRNGKey], dict]:
         target_params = jax.tree_util.tree_map(jnp.copy, params)
 
         buffer_state = buffer.init(
-            empty_transition(info.num_agents, info.obs_dim, info.num_actions)
+            empty_transition(info.num_agents, info.obs_dim, info.num_actions, carry_dim)
         )
 
         # Reset ``num_envs`` parallel envs.
@@ -338,6 +360,14 @@ def make_train(config: IQLConfig, env: Any) -> Callable[[chex.PRNGKey], dict]:
             "buffer_state": buffer_state,
             "env_state": env_state0,
             "last_obs": obs0,
+            # Per-agent recurrent carry, threaded across the collection scan and the outer
+            # loop so memory persists *within* an episode and is reset at its boundary.
+            # ``(num_envs, N, carry_dim)``; zero-width (carry_dim == 0) for the FF net, so
+            # it is an empty placeholder there. Reset at start (fresh episodes).
+            "hidden": _reset_carry(cfg.num_envs, info.num_agents),
+            # Whether each env's *previous* step terminated -- used to zero the carry
+            # before the next forward (episode-boundary reset). All-False after the reset.
+            "last_done": jnp.zeros((cfg.num_envs, info.num_agents), dtype=jnp.bool_),
             "step": jnp.array(0, dtype=jnp.int32),  # total env steps collected
             "updates": jnp.array(0, dtype=jnp.int32),  # total gradient updates
             "rng": rng,
@@ -348,20 +378,33 @@ def make_train(config: IQLConfig, env: Any) -> Callable[[chex.PRNGKey], dict]:
         # factory closes over those params so the inner scan body is parameter-free.
         def make_collect(params):
             def _collect_step_p(cstate, _):
-                env_state, last_obs, step, rng = cstate
+                env_state, last_obs, hidden_ENH, last_done_EN, step, rng = cstate
                 rng, rng_act, rng_step = jax.random.split(rng, 3)
                 obs_ENA = jnp.stack([last_obs[a] for a in agents], axis=1)
                 avail_ENA = _avail_batched(env_state)
                 eps = _epsilon_by_step(step, cfg)
 
-                def _act_one(obs_NA, avail_NA, key):
-                    carry = _reset_carry(info.num_agents)
+                # Episode-boundary reset of the recurrent carry: the carry that enters
+                # this step's forward is the carried hidden state, zeroed for any env that
+                # terminated on the previous step (a fresh episode must start from a clean
+                # memory). ``last_done`` broadcasts over the carry's hidden axis. For the
+                # FF net the carry is zero-width, so this is a no-op on an empty array.
+                zero_carry = _reset_carry(cfg.num_envs, info.num_agents)
+                h_in_ENH = jnp.where(last_done_EN[..., jnp.newaxis], zero_carry, hidden_ENH)
+
+                def _act_one(h_NH, obs_NA, avail_NA, key):
+                    # One GRU step from the (boundary-reset) carry; resets are 0 here
+                    # because the reset was already applied to ``h_in_ENH`` above. Returns
+                    # the post-step carry and the eps-greedy action + its behaviour log-p.
                     resets_N = jnp.zeros((info.num_agents,))
-                    _, q_NA = _forward_q(network.apply, params, carry, obs_NA, resets_N)
-                    return _epsilon_greedy_actions(q_NA, avail_NA, eps, key)
+                    h_next_NH, q_NA = _forward_q(network.apply, params, h_NH, obs_NA, resets_N)
+                    act_N, logp_N = _epsilon_greedy_actions(q_NA, avail_NA, eps, key)
+                    return h_next_NH, act_N, logp_N
 
                 act_keys = jax.random.split(rng_act, cfg.num_envs)
-                actions_EN, logp_EN = jax.vmap(_act_one)(obs_ENA, avail_ENA, act_keys)
+                h_next_ENH, actions_EN, logp_EN = jax.vmap(_act_one)(
+                    h_in_ENH, obs_ENA, avail_ENA, act_keys
+                )
                 actions = {a: actions_EN[:, i] for i, a in enumerate(agents)}
 
                 step_keys = jax.random.split(rng_step, cfg.num_envs)
@@ -379,8 +422,16 @@ def make_train(config: IQLConfig, env: Any) -> Callable[[chex.PRNGKey], dict]:
                     next_obs=next_obs_ENA,
                     avail_actions=avail_ENA,
                     behavior_log_prob=logp_EN.astype(jnp.float32),
+                    # Stored state (R2D2): ``hidden`` produced Q(obs) this step (post
+                    # boundary-reset input carry); ``next_hidden`` is the post-step carry,
+                    # which feeds Q(next_obs) in the bootstrap target. Both ``(E, N, H)``.
+                    hidden=h_in_ENH,
+                    next_hidden=h_next_ENH,
                 )
-                return (next_env_state, next_obs, step + cfg.num_envs, rng), transitions
+                new_cstate = (
+                    next_env_state, next_obs, h_next_ENH, done_EN, step + cfg.num_envs, rng
+                )
+                return new_cstate, transitions
 
             return _collect_step_p
 
@@ -391,9 +442,16 @@ def make_train(config: IQLConfig, env: Any) -> Callable[[chex.PRNGKey], dict]:
 
             # --- COLLECT num_steps across num_envs parallel envs ---
             rng, rng_collect = jax.random.split(rng)
-            (env_state, last_obs, step, _), traj = jax.lax.scan(
+            (env_state, last_obs, hidden, last_done, step, _), traj = jax.lax.scan(
                 make_collect(ts.params),
-                (runner["env_state"], runner["last_obs"], runner["step"], rng_collect),
+                (
+                    runner["env_state"],
+                    runner["last_obs"],
+                    runner["hidden"],
+                    runner["last_done"],
+                    runner["step"],
+                    rng_collect,
+                ),
                 None,
                 length=cfg.num_steps,
             )
@@ -484,6 +542,8 @@ def make_train(config: IQLConfig, env: Any) -> Callable[[chex.PRNGKey], dict]:
                 "buffer_state": buffer_state,
                 "env_state": env_state,
                 "last_obs": last_obs,
+                "hidden": hidden,
+                "last_done": last_done,
                 "step": step,
                 "updates": updates,
                 "rng": rng,
@@ -531,14 +591,22 @@ def make_train(config: IQLConfig, env: Any) -> Callable[[chex.PRNGKey], dict]:
             avail_BN = flat(batch.avail_actions)
 
             zeros_resets = jnp.zeros((b * n,))
-            carry = _reset_carry(b * n)
+            # Stored-state recurrent TD: evaluate Q from the *stored* per-agent carries
+            # rather than a zeroed one. ``hidden`` produced Q(obs) at collection; the
+            # ``next_hidden`` (post-step) carry evaluates Q(next_obs) for the bootstrap.
+            # The reset flag is 0 (boundary resets were applied when the carries were
+            # stored), so each forward is a single GRU cell step -- no time-unroll, no
+            # ``nn.scan``. For the FF net both carries are zero-width, recovering the
+            # original memoryless update exactly.
+            carry_obs = flat(batch.hidden)  # (B*N, H)
+            carry_next = flat(batch.next_hidden)  # (B*N, H)
 
-            _, q_BNA = _forward_q(network.apply, params, carry, obs_BN, zeros_resets)
+            _, q_BNA = _forward_q(network.apply, params, carry_obs, obs_BN, zeros_resets)
             _, q_next_online_BNA = _forward_q(
-                network.apply, params, carry, next_obs_BN, zeros_resets
+                network.apply, params, carry_next, next_obs_BN, zeros_resets
             )
             _, q_next_target_BNA = _forward_q(
-                network.apply, target_params, carry, next_obs_BN, zeros_resets
+                network.apply, target_params, carry_next, next_obs_BN, zeros_resets
             )
 
             # Q of the taken action.

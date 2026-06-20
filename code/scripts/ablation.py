@@ -40,9 +40,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-import jaxmarl
-
-from conformal_marl.envs.simultaneous_attack import SimultaneousAttack
+from conformal_marl.envs.registry import make_env
 from conformal_marl.iql import IQLConfig, get_env_info, make_train
 
 # matplotlib: headless backend (no display on CI / servers).
@@ -272,7 +270,7 @@ def main() -> None:
     # Simultaneous-Attack (the primary deliverable).
     run_env(
         "Simultaneous-Attack (N=3)",
-        SimultaneousAttack(num_agents=3),
+        make_env("simu", num_agents=3)[0],
         simu_ablation_config,
         opt_return=1.0,  # all-attack pays exactly +1
         seeds=args.seeds,
@@ -287,7 +285,7 @@ def main() -> None:
         # random baseline as the lower one, so "optimality" is relative progress.
         run_env(
             "MPE simple_spread",
-            jaxmarl.make("MPE_simple_spread_v3"),
+            make_env("MPE_simple_spread_v3")[0],
             spread_ablation_config,
             opt_return=0.0,
             seeds=max(3, args.seeds // 4),
