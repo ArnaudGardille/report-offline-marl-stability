@@ -15,6 +15,12 @@ to change the on-disk buffer format:
 * ``avail_actions`` -- per-agent available-action mask at ``obs`` ``(N, A)`` (all
   ones when the env has no masking). Stored so the masked target/greedy choice is
   reproducible from the buffer alone.
+* ``next_avail_actions`` -- per-agent available-action mask at ``next_obs`` ``(N, A)``.
+  Required for a correct double-DQN bootstrap when the action set *changes between
+  steps* (SMAX: units die / come into range, so the legal actions at ``s'`` differ from
+  those at ``s``). The target masks ``Q(next_obs, .)`` with *this* mask, not the
+  ``obs`` mask. All ones (== ``avail_actions``) for the unmasked / fixed-action-set
+  envs (Simu, MPE), so their behaviour is byte-identical.
 * ``behavior_log_prob`` -- per-agent log-prob of the action actually taken under
   the epsilon-greedy *behaviour* policy at collection time ``(N,)``. Cheap to log
   and required by M3's importance-ratio / conformal machinery (you cannot recover
@@ -58,6 +64,7 @@ class Transition:
     done: chex.Array  # (N,)
     next_obs: chex.Array  # (N, obs_dim)
     avail_actions: chex.Array  # (N, A) available-action mask at `obs`
+    next_avail_actions: chex.Array  # (N, A) available-action mask at `next_obs` (target mask)
     behavior_log_prob: chex.Array  # (N,) log prob of `actions` under the behaviour policy
     # M7 recurrent (R2D2-style "stored state") fields. ``hidden`` is the per-agent GRU
     # carry that produced Q(obs) at collection time (after any episode-boundary reset);
@@ -127,6 +134,7 @@ def empty_transition(
         done=jnp.zeros((num_agents,), dtype=jnp.bool_),
         next_obs=jnp.zeros((num_agents, obs_dim), dtype=jnp.float32),
         avail_actions=jnp.ones((num_agents, num_actions), dtype=jnp.float32),
+        next_avail_actions=jnp.ones((num_agents, num_actions), dtype=jnp.float32),
         behavior_log_prob=jnp.zeros((num_agents,), dtype=jnp.float32),
         hidden=jnp.zeros((num_agents, hidden_dim), dtype=jnp.float32),
         next_hidden=jnp.zeros((num_agents, hidden_dim), dtype=jnp.float32),

@@ -173,6 +173,89 @@ def test_transition_stores_joint_action():
     assert t.actions.shape == (num_agents,)
     assert t.behavior_log_prob.shape == (num_agents,)
     assert t.avail_actions.shape == (num_agents, num_actions)
+    # The next-state mask (M8) carries the same per-agent (N, A) shape as avail_actions.
+    assert t.next_avail_actions.shape == (num_agents, num_actions)
     # u_{-0} for agent 0 is just the other two entries.
     others = t.actions[jnp.array([1, 2])]
     assert others.shape == (2,)
+
+
+# ===================================================== P1: next-state target masking
+def test_double_dqn_target_uses_next_state_mask():
+    """The double-DQN target masks Q(next_obs) with ``next_avail`` -- a changed next-state
+    legal set picks a different bootstrap action (the SMAX correctness fix).
+
+    Hand-built two-row example: at ``s'`` the highest Q is action 2, but if ``next_avail``
+    forbids action 2 the masked argmax falls to the next-best *available* action, so the
+    target changes. With an all-ones mask the unrestricted argmax (action 2) is used.
+    """
+    from conformal_marl.iql import double_dqn_target
+
+    # online == target Q at s' (so the target is exactly Q at the chosen action); one row.
+    q_next = jnp.array([[0.1, 0.5, 0.9, 0.2]])  # (1, 4): argmax is action 2 (Q=0.9)
+    reward = jnp.array([0.0])
+    done = jnp.array([0.0])
+    gamma = 1.0
+
+    # All actions available -> unrestricted argmax (action 2) -> target == 0.9.
+    all_avail = jnp.ones((1, 4))
+    t_all = double_dqn_target(q_next, q_next, all_avail, reward, done, gamma)
+    np.testing.assert_allclose(np.asarray(t_all), [0.9], atol=1e-6)
+
+    # Action 2 NOT available at s' -> masked argmax is action 1 (Q=0.5) -> target == 0.5.
+    # This is the value the *obs*-mask (which still allowed action 2) would have gotten
+    # wrong; using the next-state mask fixes it.
+    next_avail = jnp.array([[1.0, 1.0, 0.0, 1.0]])
+    t_masked = double_dqn_target(q_next, q_next, next_avail, reward, done, gamma)
+    np.testing.assert_allclose(np.asarray(t_masked), [0.5], atol=1e-6)
+    assert float(t_all[0]) != float(t_masked[0])
+
+    # Terminal transition: the bootstrap is zeroed regardless of the mask.
+    t_term = double_dqn_target(q_next, q_next, all_avail, reward, jnp.array([1.0]), gamma)
+    np.testing.assert_allclose(np.asarray(t_term), [0.0], atol=1e-6)
+
+
+@pytest.mark.slow
+def test_smax_next_avail_mask_changes_between_steps():
+    """On SMAX (a real action-masked env) the available-action set at ``next_obs`` differs
+    from the set at ``obs`` -- the case the M8 next-state-mask fix exists for.
+
+    Without the fix the double-DQN target would mask Q(next_obs) with the *obs* mask. Here
+    we confirm the two masks genuinely diverge over a short rollout (so storing the
+    next-state mask is load-bearing, not cosmetic). Marked ``slow`` because building SMAX
+    is heavier than the bandit tests.
+    """
+    from conformal_marl.envs.registry import make_env
+
+    env, spec = make_env("SMAX", map_name="3m")
+    assert spec.masks_actions  # SMAX masks; precondition for the fix to matter.
+    agents = list(env.agents)
+
+    def avail(state):  # per-agent (N, A) mask, as the IQL loop builds it
+        m = env.get_avail_actions(state)
+        return jnp.stack([m[a] for a in agents], axis=0)
+
+    # Roll a short masked-random episode; record (avail_at_obs, avail_at_next) each step.
+    obs, state = env.reset(jax.random.PRNGKey(0))
+
+    def _step(carry, k):
+        state, rng = carry
+        rng, k_act, k_step = jax.random.split(rng, 3)
+        cur = avail(state)  # (N, A) at current state
+        # A legal random action per agent (categorical over the mask) so steps progress.
+        akeys = jax.random.split(k_act, len(agents))
+        acts_N = jax.vmap(lambda lg, kk: jax.random.categorical(kk, jnp.log(lg + 1e-9)))(
+            cur, akeys
+        )
+        acts = {a: acts_N[i] for i, a in enumerate(agents)}
+        _, nstate, _, _, _ = env.step(k_step, state, acts)
+        nxt = avail(nstate)  # (N, A) at next state
+        return (nstate, rng), (cur, nxt)
+
+    _, (cur_T, nxt_T) = jax.lax.scan(
+        _step, (state, jax.random.PRNGKey(1)), jax.random.split(jax.random.PRNGKey(2), 32)
+    )
+    # The fix exists because these can differ; assert they actually do somewhere.
+    assert bool(jnp.any(cur_T != nxt_T)), (
+        "expected SMAX's available-action set to change between steps"
+    )

@@ -48,11 +48,22 @@ Outputs
 * A printed summary with the achieved Simu false-alarm rates (matched?) and the Overcooked
   detection delays for both detectors.
 
+M8 update
+---------
+The detection-delay measurement is now **env-agnostic** (:func:`detection_delay_env`):
+the original Overcooked path is one call into it (kept as :func:`detection_delay_overcooked`),
+and ``--env mpe`` runs the same experiment on MPE ``simple_spread`` -- a cheaper *and*
+cleaner showcase, because that policy is non-trivial (its post-swap behaviour change is a
+real drift, not noise around a near-random Overcooked policy). The partner-swap stream
+collector (:func:`drift_demo.collect_stream`) drives **all** non-zero agents with the
+swappable partner policy, so it works for the 3-agent MPE as well as the 2-agent envs.
+
 Usage::
 
     uv run python scripts/detection_benchmark.py                 # full (Simu lab + Overcooked)
-    uv run python scripts/detection_benchmark.py --no-overcooked # Simu lab only (fastest)
-    uv run python scripts/detection_benchmark.py --seeds 8 --delta 0.05
+    uv run python scripts/detection_benchmark.py --env mpe       # Simu lab + MPE simple_spread
+    uv run python scripts/detection_benchmark.py --no-heavy      # Simu lab only (fastest)
+    uv run python scripts/detection_benchmark.py --env mpe --seeds 8 --delta 0.05
 """
 
 from __future__ import annotations
@@ -305,43 +316,72 @@ def calibrate_on_simu(delta, n_h0, h0_len, seed):
     }
 
 
-# ------------------------------------------------------------ detection delay (Overcooked)
-def detection_delay_overcooked(calib, delta, seeds, pre_len, post_len, layout="cramped_room"):
-    """Per-seed detection delays for both detectors on an Overcooked partner swap.
+# ------------------------------------------------------------ detection delay (per env)
+def detection_delay_env(calib, delta, seeds, pre_len, post_len, env_name,
+                        hidden_dim=None, label=None, **env_kwargs):
+    """Per-seed detection delays for both detectors on a controlled partner swap.
 
-    Uses the matched AES threshold and reference from the Simu calibration. For each seed:
-    train a short Overcooked policy, swap the partner at ``pre_len`` to its least-likely
-    action (reusing the M4 swap infra), build both signals, and run both detectors.
+    Env-agnostic core of the headline experiment (used for Overcooked *and* MPE
+    ``simple_spread``). Uses the matched AES threshold/reference from the Simu calibration.
+    For each seed: train a short policy on ``env_name``, swap the partner block at
+    ``pre_len`` to the learner's least-likely action (reusing the M4 swap infra), build
+    both detector signals on the *same* stream, and run both detectors at matched
+    false-alarm. Also computes an env-native AES calibration (the fairest baseline).
 
     Returns a dict with per-seed delays (``-1`` == missed) and the raw signals of seed 0
-    (for the figure).
+    (for the figure). The ``layout``/``map_name`` etc. are forwarded via ``env_kwargs``.
     """
-    print(f"\n========== Overcooked ({layout}) detection delay over {len(seeds)} seeds ==========")
+    label = label or env_name
+    env, spec = make_env(env_name, **env_kwargs)
+    # The partner-swap intervention is a *fixed* scripted action played for the whole
+    # post-swap block (``make_constant_partner_params`` on ``least_likely_action``), and the
+    # conformal score / AES TD signal are computed on an all-ones mask. Both assume a
+    # state-independent action set. For action-masked envs (SMAX: legal actions change as
+    # units die / come into range) that fixed action is illegal in some states and the
+    # scores would rank illegal actions -- so the resulting numbers are not a valid
+    # benchmark. Masked-env detection needs a mask-aware intervention (future work); fail
+    # fast here instead of silently producing junk. SMAX's validated contribution is the
+    # double-DQN next-state target mask in ``iql.py`` (P1), exercised by the training tests.
+    if spec.masks_actions:
+        raise NotImplementedError(
+            f"detection_delay_env does not support the action-masked env '{env_name}': its "
+            "fixed-action partner-swap intervention and unmasked scoring assume a "
+            "state-independent action set. Use an unmasked env for the detection benchmark "
+            "(e.g. Overcooked, a standard JaxMARL benchmark with a fixed action set). "
+            "Masked-env detection requires a mask-aware intervention and is out of scope here."
+        )
+    print(f"\n========== {label} detection delay over {len(seeds)} seeds ==========")
     ref_mean = calib["aes_ref_mean"]
     ref_std = calib["aes_ref_std"]
     aes_thr = calib["aes_threshold"]
-
-    env, _ = make_env("overcooked", layout=layout)
     info = get_env_info(env)
-    hd = 64
+    cfg = short_iql_config(env_name)
+    # The detection stream collector + scorer use the feed-forward ``QNetwork`` (single-step
+    # forwards, no recurrent carry), so the trained policy must be FF too, and the scoring
+    # net's hidden_dim MUST equal the trained config's. We derive ``hd`` from ``cfg`` (the
+    # single source of truth) rather than a separately-passed value, so they can never
+    # disagree -- the bug that bites when a caller's hidden_dim != the env's training config.
+    cfg.net_type = "ff"
+    if hidden_dim is not None:
+        cfg.hidden_dim = hidden_dim  # let the caller pick the (shared) width if it wants
+    hd = cfg.hidden_dim
     net = QNetwork(action_dim=info.num_actions, hidden_dim=hd)
-    cfg = short_iql_config("overcooked")
     train = jax.jit(make_train(cfg, env))
 
-    # --- Overcooked-native AES calibration (gives AES its BEST shot on this env) ---
-    # Train one calibration policy, generate no-swap (H0) Overcooked streams, set the AES
-    # reference + threshold to hit the shared budget delta *on Overcooked itself* (not
-    # transferred from Simu). Also measure the conformal detector's achieved Overcooked H0
-    # false-alarm, so the matched-budget claim is checked on Overcooked too. This is the
-    # fairest possible AES baseline: if it still loses on delay when natively calibrated,
-    # the conformal advantage is robust; if it wins, the honest differentiator is the
+    # --- env-native AES calibration (gives AES its BEST shot on this env) ---
+    # Train one calibration policy, generate no-swap (H0) streams *on this env*, set the AES
+    # reference + threshold to hit the shared budget delta on the env itself (not
+    # transferred from Simu). Also measure the conformal detector's achieved H0 false-alarm
+    # here, so the matched-budget claim is checked on this env too. This is the fairest
+    # possible AES baseline: if it still loses on delay when natively calibrated, the
+    # conformal advantage is robust; if it wins, the honest differentiator is the
     # guarantee/transfer, not raw delay.
     cal_seed = seeds[0]
     cal_params = jax.block_until_ready(train(jax.random.PRNGKey(cal_seed)))["final_params"]
     n_oc_h0 = 60
     h0_keys = jax.random.split(jax.random.PRNGKey(cal_seed + 7000), n_oc_h0)
 
-    def _oc_h0(k):  # no-swap (partner == self) Overcooked stream signals
+    def _oc_h0(k):  # no-swap (partner == self) stream signals on this env
         return build_signals_jax(env, info, net, cal_params, cal_params, hd,
                                  pre_len, post_len, k)
 
@@ -352,7 +392,7 @@ def detection_delay_overcooked(calib, delta, seeds, pre_len, post_len, layout="c
         lambda p: run_martingale(p, delta=delta, reset_on_alarm=False)
     ))(p0_h0)
     conf_fa_oc = float(np.asarray(conf_h0.crossed).mean())
-    # Sweep AES threshold on Overcooked H0 -> smallest z with FA <= delta (most sensitive).
+    # Sweep AES threshold on this env's H0 -> smallest z with FA <= delta (most sensitive).
     oc_thr_grid = np.linspace(0.3, 10.0, 50)
     oc_aes_fa = []
     for thr in oc_thr_grid:
@@ -363,7 +403,7 @@ def detection_delay_overcooked(calib, delta, seeds, pre_len, post_len, layout="c
     oc_aes_fa = np.array(oc_aes_fa)
     feas = np.where(oc_aes_fa <= delta + 1e-9)[0]
     oc_aes_thr = float(oc_thr_grid[int(feas[0])] if feas.size else oc_thr_grid[-1])
-    print(f"  Overcooked-native calibration: conformal H0 FA={conf_fa_oc:.4f} "
+    print(f"  {label}-native calibration: conformal H0 FA={conf_fa_oc:.4f} "
           f"(<= delta={delta}: {conf_fa_oc <= delta}); AES native z={oc_aes_thr:.2f} "
           f"(ref mean={oc_ref_mean:.3f} std={oc_ref_std:.3f})")
 
@@ -387,24 +427,24 @@ def detection_delay_overcooked(calib, delta, seeds, pre_len, post_len, layout="c
         conf_first = int(conf.first_alarm)
         conf_delay = conf_first - cp if conf_first >= cp else -1
 
-        # AES: reference's frozen stats from Simu; build the AES reference also from this
+        # AES: reference's frozen stats from Simu; building the AES reference from this
         # stream's *pre-swap* block would leak the env; we keep the Simu-calibrated frozen
         # reference (a detector tuned on the cheap lab, applied unchanged -- the honest
         # deployment story). But the TD scale differs across envs, so we ALSO compute an
-        # Overcooked-local frozen reference from the pre-swap block and report both.
+        # env-local frozen reference from the pre-swap block and report both.
         det = aes_detector(jnp.asarray(abs_td), ref_mean, ref_std, aes_thr)
         aes_first = int(det.first_alarm)
         aes_delay = aes_first - cp if aes_first >= cp else -1
 
-        # Overcooked-local AES reference (pre-swap block) -> a *favourable* AES calibration
-        # (gives AES the benefit of an in-distribution reference). Simu threshold reused.
+        # Env-local AES reference (pre-swap block) -> a *favourable* AES calibration (gives
+        # AES the benefit of an in-distribution reference). Simu threshold reused.
         loc_mean, loc_std = reference_stats(jnp.asarray(abs_td[:pre_len]))
         det_loc = aes_detector(jnp.asarray(abs_td), float(loc_mean), float(loc_std), aes_thr)
         aes_first_loc = int(det_loc.first_alarm)
         aes_delay_loc = aes_first_loc - cp if aes_first_loc >= cp else -1
 
-        # Overcooked-NATIVE AES: reference + threshold both calibrated on Overcooked H0
-        # (AES's best possible operating point on this env -- the fairest baseline).
+        # Env-NATIVE AES: reference + threshold both calibrated on this env's H0 (AES's best
+        # possible operating point on this env -- the fairest baseline).
         det_nat = aes_detector(jnp.asarray(abs_td), oc_ref_mean, oc_ref_std, oc_aes_thr)
         aes_first_nat = int(det_nat.first_alarm)
         aes_delay_nat = aes_first_nat - cp if aes_first_nat >= cp else -1
@@ -414,7 +454,7 @@ def detection_delay_overcooked(calib, delta, seeds, pre_len, post_len, layout="c
         print(f"  seed {seed}: trained {time.perf_counter() - t0:.1f}s | swap@{cp} "
               f"swap_action={swap_action} | conformal delay={conf_delay} "
               f"AES(simu-ref) delay={aes_delay} AES(local-ref) delay={aes_delay_loc} "
-              f"AES(oc-native) delay={aes_delay_nat}")
+              f"AES({label}-native) delay={aes_delay_nat}")
 
         if si == 0:
             example = {
@@ -428,17 +468,30 @@ def detection_delay_overcooked(calib, delta, seeds, pre_len, post_len, layout="c
             }
 
     return {
-        "layout": layout,
+        "env": env_name,
+        "label": label,
+        "env_kwargs": {k: str(v) for k, v in env_kwargs.items()},
         "seeds": list(seeds),
         "conf_delays": conf_delays,
         "aes_delays_simu_ref": [d[0] for d in aes_delays],
         "aes_delays_local_ref": [d[1] for d in aes_delays],
+        # Key kept as ``*_oc_native`` for the plotting code (env-native AES calibration);
+        # despite the name it is whichever env this run targeted (Overcooked or MPE).
         "aes_delays_oc_native": [d[2] for d in aes_delays],
         "aes_threshold_simu": aes_thr,
         "aes_threshold_oc_native": oc_aes_thr,
         "conf_fa_overcooked": conf_fa_oc,
         "example": example,
     }
+
+
+def detection_delay_overcooked(calib, delta, seeds, pre_len, post_len, layout="cramped_room"):
+    """Back-compat wrapper: Overcooked partner-swap detection delay (see
+    :func:`detection_delay_env`)."""
+    return detection_delay_env(
+        calib, delta, seeds, pre_len, post_len, env_name="overcooked",
+        hidden_dim=64, label=f"Overcooked ({layout})", layout=layout,
+    )
 
 
 # --------------------------------------------------------------------------- plotting
@@ -470,7 +523,8 @@ def plot_benchmark(calib, oc, delta, out_png: Path):
     ax.legend(fontsize=7, loc="upper right")
     ax.grid(alpha=0.25)
 
-    # (b) Detection-delay distributions on Overcooked.
+    # (b) Detection-delay distributions on the heavy/standard env.
+    env_label = oc["label"] if (oc is not None and "label" in oc) else "Overcooked"
     ax = fig.add_subplot(gs[0, 1])
     if oc is not None:
         conf_d = [d for d in oc["conf_delays"] if d >= 0]
@@ -507,7 +561,7 @@ def plot_benchmark(calib, oc, delta, out_png: Path):
         ax.set_xticks(positions)
         ax.set_xticklabels(labels, fontsize=8)
         ax.set_ylabel("detection delay (steps after swap)  [#detected/seeds]")
-        ax.set_title(f"(b) Detection delay, Overcooked\n(matched false-alarm, "
+        ax.set_title(f"(b) Detection delay, {env_label}\n(matched false-alarm, "
                      f"{len(oc['seeds'])} seeds)")
         ax.grid(alpha=0.25, axis="y")
     else:
@@ -542,8 +596,8 @@ def plot_benchmark(calib, oc, delta, out_png: Path):
     else:
         ax.text(0.5, 0.5, "Overcooked skipped", ha="center", va="center")
 
-    fig.suptitle("M5 headline: anytime-valid conformal drift detection vs AES heuristic "
-                 "at matched false-alarm", fontsize=12, y=0.99)
+    fig.suptitle(f"Anytime-valid conformal drift detection vs AES heuristic at matched "
+                 f"false-alarm ({env_label})", fontsize=12, y=0.99)
     fig.tight_layout(rect=[0, 0, 1, 0.97])
     out_png.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_png, dpi=150)
@@ -552,13 +606,18 @@ def plot_benchmark(calib, oc, delta, out_png: Path):
 
 # --------------------------------------------------------------------------- main
 def main() -> None:
-    ap = argparse.ArgumentParser(description="M5 detection-vs-AES benchmark")
+    ap = argparse.ArgumentParser(description="detection-vs-AES benchmark (Simu lab + heavy env)")
     ap.add_argument("--delta", type=float, default=0.05, help="Ville level / target false-alarm")
     ap.add_argument("--seed", type=int, default=0)
-    ap.add_argument("--seeds", type=int, default=8, help="number of Overcooked seeds")
+    ap.add_argument("--seeds", type=int, default=8, help="number of heavy-env seeds")
     ap.add_argument("--n-h0", type=int, default=200, help="H0 streams for the Simu lab")
     ap.add_argument("--h0-len", type=int, default=240, help="length of each H0 stream")
-    ap.add_argument("--no-overcooked", action="store_true")
+    ap.add_argument(
+        "--env", choices=["overcooked", "mpe"], default="overcooked",
+        help="heavy/standard env for the detection-delay panel (mpe == simple_spread)",
+    )
+    ap.add_argument("--no-heavy", "--no-overcooked", dest="no_heavy", action="store_true",
+                    help="Simu false-alarm lab only (skip the heavy-env detection run)")
     args = ap.parse_args()
 
     os.environ.setdefault("JAX_PLATFORMS", "cpu")
@@ -568,20 +627,31 @@ def main() -> None:
     calib = calibrate_on_simu(args.delta, args.n_h0, args.h0_len, args.seed)
 
     oc = None
-    if not args.no_overcooked:
+    if not args.no_heavy:
         seeds = list(range(args.seed, args.seed + args.seeds))
-        # post_len=300: an anytime-valid test legitimately accumulates evidence over a
-        # long post-change window (its defining strength); the weak per-step KL from the
-        # short Overcooked training budget needs ~100-160 steps of wealth to cross 1/delta.
-        oc = detection_delay_overcooked(calib, args.delta, seeds, pre_len=150, post_len=300)
+        # post_len: an anytime-valid test legitimately accumulates evidence over a long
+        # post-change window (its defining strength). Overcooked's weak per-step KL (near-
+        # random co-players) needs a long window; MPE's non-trivial policy gives a much
+        # stronger per-step signal, so a shorter window suffices there.
+        if args.env == "mpe":
+            oc = detection_delay_env(
+                calib, args.delta, seeds, pre_len=80, post_len=200,
+                env_name="MPE_simple_spread_v3", hidden_dim=128, label="MPE simple_spread",
+            )
+        else:
+            oc = detection_delay_overcooked(
+                calib, args.delta, seeds, pre_len=150, post_len=300
+            )
 
-    fig = RESULTS_DIR / "m5_detection_vs_aes.png"
+    fig_name = "m8_detection_mpe.png" if args.env == "mpe" else "m5_detection_vs_aes.png"
+    fig = RESULTS_DIR / fig_name
     plot_benchmark(calib, oc, args.delta, fig)
     print(f"\nfigure -> {fig}")
 
-    payload = {"calibration": calib, "overcooked": oc, "delta": args.delta}
-    (OUTPUTS_DIR / "m5_detection_benchmark.json").write_text(json.dumps(payload))
-    print(f"raw numbers -> {OUTPUTS_DIR / 'm5_detection_benchmark.json'}")
+    json_name = "m8_detection_mpe.json" if args.env == "mpe" else "m5_detection_benchmark.json"
+    payload = {"calibration": calib, "heavy": oc, "env": args.env, "delta": args.delta}
+    (OUTPUTS_DIR / json_name).write_text(json.dumps(payload))
+    print(f"raw numbers -> {OUTPUTS_DIR / json_name}")
 
     # Printed summary.
     print("\n================= SUMMARY =================")
@@ -594,11 +664,12 @@ def main() -> None:
         nl, ml, al = _delay_stats(oc["aes_delays_local_ref"])
         nn, mn, an = _delay_stats(oc["aes_delays_oc_native"])
         ns = len(oc["seeds"])
-        print(f"Overcooked H0 false-alarm: conformal {oc['conf_fa_overcooked']:.4f} "
+        lab = oc.get("label", "heavy env")
+        print(f"{lab} H0 false-alarm: conformal {oc['conf_fa_overcooked']:.4f} "
               f"(<= delta={args.delta}); AES native threshold z={oc['aes_threshold_oc_native']:.2f}")
-        print(f"Overcooked detection delay over {ns} seeds (median / mean, #detected):")
+        print(f"{lab} detection delay over {ns} seeds (median / mean, #detected):")
         print(f"  conformal             : {mc:.1f} / {ac:.1f}  ({nc}/{ns} detected)")
-        print(f"  AES (oc-native cal)   : {mn:.1f} / {an:.1f}  ({nn}/{ns} detected)")
+        print(f"  AES (env-native cal)  : {mn:.1f} / {an:.1f}  ({nn}/{ns} detected)")
         print(f"  AES (local ref)       : {ml:.1f} / {al:.1f}  ({nl}/{ns} detected)")
         print(f"  AES (simu ref)        : {ma:.1f} / {aa:.1f}  ({na}/{ns} detected)")
 

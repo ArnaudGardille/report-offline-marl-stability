@@ -35,3 +35,6 @@ code/.venv/
 outputs/
 multirun/
 wandb/
+# Smoke-scale benchmark figures (CI/CPU verification artifacts from run_benchmark.py
+# --smoke); throwaway, not the committed camera-ready figures.
+code/results/*_smoke.png

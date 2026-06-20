@@ -100,16 +100,26 @@ def _eps_greedy_actions(params, net, hidden_dim, num_agents, num_actions, obs_NA
 
 
 def collect_stream(env, info, net, p_self, p_partner, key, n_steps, hidden_dim, eps):
-    """Roll out ``n_steps`` with agent 0 acting under ``p_self`` and agent 1 under
-    ``p_partner`` (the controllable "partner"). Returns a batched :class:`Transition`.
+    """Roll out ``n_steps`` with agent 0 acting under ``p_self`` and **all other agents**
+    under ``p_partner`` (the controllable "partner"). Returns a batched :class:`Transition`.
 
-    The joint action stored each step is ``[a_self_0, a_partner_1]``: agent 0 plays its
-    own policy, the partner column is driven by ``p_partner`` -- swapping ``p_partner``
-    mid-stream is exactly the controlled drift.
+    The stored joint action is agent 0 from ``p_self`` and agents ``1..N-1`` from
+    ``p_partner`` -- swapping ``p_partner`` mid-stream is exactly the controlled drift that
+    agent 0's conformal score (which aggregates over the *other* agents ``j != 0``) sees.
+    For the 2-agent envs (Simu / Overcooked) this is ``[a_self_0, a_partner_1]`` exactly as
+    before; for the 3-agent MPE ``simple_spread`` it drives agents 1 and 2 together, so a
+    single scripted swap produces a strong, observable drift in agent 0's p-values.
+
+    Precondition: an **unmasked / fixed-action-set** env. The stored ``avail_actions`` /
+    ``next_avail_actions`` are all-ones and the eps-greedy selection is unmasked, so on an
+    action-masked env (SMAX) this would pick/score illegal actions. Callers building the
+    detection benchmark reject masked envs upstream (see ``detection_delay_env``).
     """
     agents = info.agents
     n_agents = info.num_agents
     n_act = info.num_actions
+    # All agents except index 0 are driven by the (swappable) partner policy.
+    is_partner_N = jnp.arange(n_agents) != 0
     obs0, state0 = env.reset(key)
 
     def _step(carry, k):
@@ -122,8 +132,8 @@ def collect_stream(env, info, net, p_self, p_partner, key, n_steps, hidden_dim, 
         a_part = _eps_greedy_actions(
             p_partner, net, hidden_dim, n_agents, n_act, obs_NA, jax.random.fold_in(k_act, 1), eps
         )
-        # Agent 0 from self; agent 1 (partner) from partner params.
-        acts_N = jnp.array([a_self[0], a_part[1]])
+        # Agent 0 from self; every other agent (the partner block) from partner params.
+        acts_N = jnp.where(is_partner_N, a_part, a_self)
         acts = {a: acts_N[i] for i, a in enumerate(agents)}
         nobs, nstate, rewards, dones, _ = env.step(k_step, state, acts)
         nobs_NA = jnp.stack([nobs[a] for a in agents], axis=0)
@@ -134,6 +144,10 @@ def collect_stream(env, info, net, p_self, p_partner, key, n_steps, hidden_dim, 
             done=jnp.stack([dones[a] for a in agents]),
             next_obs=nobs_NA,
             avail_actions=jnp.ones((n_agents, n_act), dtype=jnp.float32),
+            # Detection streams run on unmasked envs (Simu / MPE / Overcooked-via-FlatObs),
+            # so the next-state mask is all-ones (== avail_actions); kept explicit for the
+            # M8 schema.
+            next_avail_actions=jnp.ones((n_agents, n_act), dtype=jnp.float32),
             behavior_log_prob=jnp.zeros((n_agents,), dtype=jnp.float32),
             # Feed-forward stream: zero-width recurrent carry placeholders (M7 schema).
             hidden=jnp.zeros((n_agents, 0), dtype=jnp.float32),
@@ -293,6 +307,18 @@ def short_iql_config(env_name: str, sampler="uniform") -> IQLConfig:
             total_timesteps=8_000, num_envs=8, num_steps=8, num_grad_steps=8,
             learning_starts=200, hidden_dim=32, lr=1e-3, gamma=0.99, batch_size=64,
             epsilon_anneal_time=4_000, eval_episodes=64, eval_steps=2, sampler_name=sampler,
+        )
+    if env_name.startswith("MPE"):
+        # MPE simple_spread trains fast and *meaningfully* on CPU: 250k steps takes ~25s
+        # and lifts greedy return from ~-31 (random) to ~-23 (agents move to cover
+        # landmarks). A non-trivial policy is the whole point of the MPE detection
+        # showcase -- unlike Overcooked, the post-swap drift is a real behaviour change,
+        # not noise around a near-random policy.
+        return IQLConfig(
+            total_timesteps=250_000, num_envs=16, num_steps=16, num_grad_steps=16,
+            learning_starts=5_000, hidden_dim=128, lr=5e-4, gamma=0.95, batch_size=256,
+            buffer_size=200_000, target_update_interval=200, epsilon_anneal_time=150_000,
+            eval_episodes=32, eval_steps=26, sampler_name=sampler,
         )
     # overcooked: brief budget; reward stays ~0 (sparse) but policies become distinct.
     return IQLConfig(
