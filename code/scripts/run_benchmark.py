@@ -17,26 +17,34 @@ machinery --
 
 -- only swapping in **scale-appropriate configs** via :data:`SCALE`. The ``--smoke``
 column is sized to finish in CI-time on CPU (tiny nets / budgets / few seeds); the
-``--full`` column is sized for a GPU run (the real budgets that train SMAX/Overcooked to
-a non-trivial policy). Nothing about the scale changes the *code path* exercised, only the
+``--full`` column is sized for a full-scale run (more seeds, longer windows, the env's tuned
+budget; a GPU accelerates the multi-seed sweep). Nothing about the scale changes the *code path* exercised, only the
 numbers, so a green ``--smoke`` is genuine evidence the ``--full`` run is wired right
 (though of course ``--full`` is GPU-untested here -- see ``code/RUN_ON_GPU.md``).
+
+The **detection** experiment requires an *unmasked / fixed-action-set* env: its partner-swap
+intervention plays a fixed scripted action for the whole post-swap window, which is only
+well-defined when the legal action set does not change with state. Overcooked (a standard
+JaxMARL benchmark) and MPE/Simu qualify; **SMAX does not** (state-dependent legal actions),
+so detection rejects it -- SMAX's validated contribution is the double-DQN next-state target
+mask in ``iql.py`` (covered by the training tests), and it remains available for ``selection``.
 
 Usage::
 
     # CPU, CI-time (verifiable locally):
     uv run python scripts/run_benchmark.py --env mpe   --experiment detection --smoke
     uv run python scripts/run_benchmark.py --env simu  --experiment selection --smoke
-    uv run python scripts/run_benchmark.py --env smax  --experiment detection --smoke
     uv run python scripts/run_benchmark.py --env overcooked --experiment detection --smoke
 
     # GPU, camera-ready (Colab):
-    uv run python scripts/run_benchmark.py --env smax --experiment detection --full \
-        --map-name 3m
-    uv run python scripts/run_benchmark.py --env overcooked --experiment detection --full
+    uv run python scripts/run_benchmark.py --env overcooked --experiment detection --full \
+        --layout cramped_room
+    uv run python scripts/run_benchmark.py --env overcooked --experiment detection --full \
+        --layout asymm_advantages
 
 Figures land in ``code/results/`` (committed), raw numbers in ``code/outputs/`` (gitignored).
-The figure/json names encode env+experiment+scale so smoke and full runs don't clobber.
+The figure/json names encode env+config+experiment+scale (``_output_tag``) so smoke/full runs
+and different maps/layouts don't clobber each other.
 """
 
 from __future__ import annotations
@@ -58,9 +66,23 @@ RESULTS_DIR = CODE_DIR / "results"
 OUTPUTS_DIR = CODE_DIR / "outputs"
 
 
+def _output_tag(env_key: str, kwargs: dict, experiment: str, scale: str) -> str:
+    """Output basename ``m8_<tag>`` for a run, distinct per env-config.
+
+    Folds the env-distinguishing kwargs (``map_name`` for SMAX, ``layout`` for Overcooked)
+    into the tag so two configs of the same env don't clobber each other's figure/json --
+    e.g. SMAX ``3m`` vs ``2s3z`` or Overcooked ``cramped_room`` vs ``asymm_advantages``
+    each get their own ``m8_<env>_<config>_<experiment>_<scale>`` files.
+    """
+    suffix = "_".join(str(v) for v in kwargs.values())
+    return "_".join(p for p in (env_key, suffix, experiment, scale) if p)
+
+
 # --------------------------------------------------------------------------- env map
 # Harness env key -> (factory name, default env_kwargs, default IQL hidden_dim, human label).
-# ``simu`` and ``mpe`` are CPU-friendly; ``smax`` and ``overcooked`` are the GPU targets.
+# ``simu`` and ``mpe`` are CPU-friendly; ``overcooked`` is the heavy detection target.
+# ``smax`` is action-masked: ``detection`` rejects it (see ``detection_delay_env``); it is
+# kept here for ``selection`` (which trains via the mask-correct IQL loop).
 ENV_TABLE: dict[str, dict] = {
     "simu": {"factory": "simu", "kwargs": {}, "hidden": 32, "label": "Simultaneous-Attack"},
     "mpe": {"factory": "MPE_simple_spread_v3", "kwargs": {}, "hidden": 128,
@@ -97,7 +119,8 @@ SCALE: dict[str, dict] = {
 }
 # A smoke-scale target-env training budget. ``--full`` uses ``train_steps=None`` -> the
 # env's tuned default (or the script-level short config); smoke shrinks it hard so the
-# heavy envs (SMAX/Overcooked) still complete one compile + a few iterations on CPU.
+# heavy env (Overcooked) still completes one compile + a few iterations on CPU. (The
+# ``smax`` entry only matters for selection; detection rejects masked envs before using it.)
 SMOKE_TARGET_STEPS = {"simu": 4_000, "mpe": 8_000, "smax": 4_000, "overcooked": 6_000}
 
 
@@ -144,7 +167,7 @@ def run_detection(env_key: str, scale: str, args) -> dict:
             env_name=factory, hidden_dim=hidden, label=meta["label"], **kwargs,
         )
 
-    tag = f"{env_key}_detection_{scale}"
+    tag = _output_tag(env_key, kwargs, "detection", scale)
     fig = RESULTS_DIR / f"m8_{tag}.png"
     db.plot_benchmark(calib, heavy, args.delta, fig)
     payload = {"experiment": "detection", "env": env_key, "scale": scale,
@@ -246,7 +269,7 @@ def run_selection(env_key: str, scale: str, args) -> dict:
         print(f"  {sampler:18s}: final_opt={s['final_opt_mean']:.3f}+/-{s['final_opt_std']:.3f} "
               f"auc={s['auc']:.3f} steps_to_0.95={s['steps_to_thresh']} ({dt:.1f}s)")
 
-    tag = f"{env_key}_selection_{scale}"
+    tag = _output_tag(env_key, kwargs, "selection", scale)
     fig = RESULTS_DIR / f"m8_{tag}.png"
     ab.plot(meta["label"], results, lo, hi, fig)
     summary = {s: ab.summarise(*results[s][:2], lo, hi) for s in ab.SAMPLERS}

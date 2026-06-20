@@ -109,6 +109,11 @@ def collect_stream(env, info, net, p_self, p_partner, key, n_steps, hidden_dim, 
     For the 2-agent envs (Simu / Overcooked) this is ``[a_self_0, a_partner_1]`` exactly as
     before; for the 3-agent MPE ``simple_spread`` it drives agents 1 and 2 together, so a
     single scripted swap produces a strong, observable drift in agent 0's p-values.
+
+    Precondition: an **unmasked / fixed-action-set** env. The stored ``avail_actions`` /
+    ``next_avail_actions`` are all-ones and the eps-greedy selection is unmasked, so on an
+    action-masked env (SMAX) this would pick/score illegal actions. Callers building the
+    detection benchmark reject masked envs upstream (see ``detection_delay_env``).
     """
     agents = info.agents
     n_agents = info.num_agents

@@ -332,12 +332,28 @@ def detection_delay_env(calib, delta, seeds, pre_len, post_len, env_name,
     (for the figure). The ``layout``/``map_name`` etc. are forwarded via ``env_kwargs``.
     """
     label = label or env_name
+    env, spec = make_env(env_name, **env_kwargs)
+    # The partner-swap intervention is a *fixed* scripted action played for the whole
+    # post-swap block (``make_constant_partner_params`` on ``least_likely_action``), and the
+    # conformal score / AES TD signal are computed on an all-ones mask. Both assume a
+    # state-independent action set. For action-masked envs (SMAX: legal actions change as
+    # units die / come into range) that fixed action is illegal in some states and the
+    # scores would rank illegal actions -- so the resulting numbers are not a valid
+    # benchmark. Masked-env detection needs a mask-aware intervention (future work); fail
+    # fast here instead of silently producing junk. SMAX's validated contribution is the
+    # double-DQN next-state target mask in ``iql.py`` (P1), exercised by the training tests.
+    if spec.masks_actions:
+        raise NotImplementedError(
+            f"detection_delay_env does not support the action-masked env '{env_name}': its "
+            "fixed-action partner-swap intervention and unmasked scoring assume a "
+            "state-independent action set. Use an unmasked env for the detection benchmark "
+            "(e.g. Overcooked, a standard JaxMARL benchmark with a fixed action set). "
+            "Masked-env detection requires a mask-aware intervention and is out of scope here."
+        )
     print(f"\n========== {label} detection delay over {len(seeds)} seeds ==========")
     ref_mean = calib["aes_ref_mean"]
     ref_std = calib["aes_ref_std"]
     aes_thr = calib["aes_threshold"]
-
-    env, _ = make_env(env_name, **env_kwargs)
     info = get_env_info(env)
     cfg = short_iql_config(env_name)
     # The detection stream collector + scorer use the feed-forward ``QNetwork`` (single-step

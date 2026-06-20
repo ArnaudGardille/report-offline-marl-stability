@@ -1,10 +1,18 @@
 # Running the heavy benchmarks on GPU (Colab)
 
 The cheap experiments in this repo (Simultaneous-Attack, MPE `simple_spread`) train to a
-meaningful policy on CPU in seconds-to-minutes and are run directly here. The **heavy**
-JaxMARL benchmarks — **SMAX** (`3m`, `2s3z`, …) and **Overcooked** — need a GPU to train
-to a non-trivial policy in reasonable wall-clock. This document explains how to produce the
-camera-ready detection/selection figures on a GPU via Google Colab.
+meaningful policy on CPU in seconds-to-minutes and are run directly here. The heavy
+**Overcooked** detection benchmark is produced at full scale here (8 seeds, longer
+pre/post windows) — a GPU makes the multi-seed sweep fast. This document explains how to
+produce the camera-ready detection figures on a GPU via Google Colab.
+
+> **Why not SMAX?** SMAX is an action-masked env: its legal action set is *state-dependent*
+> (units die / come into range). The detection benchmark's intervention is a **fixed**
+> scripted partner action played for the whole post-swap window, and its scores run on an
+> all-ones mask — both assume a state-independent action set. So `--experiment detection`
+> rejects masked envs (`NotImplementedError`); a valid SMAX detection benchmark would need
+> a mask-aware intervention (future work). SMAX's validated contribution is the double-DQN
+> next-state target-mask fix in `conformal_marl/iql.py`, covered by the training tests.
 
 > **Status:** the harness (`scripts/run_benchmark.py`) is verified end-to-end at `--smoke`
 > scale on CPU (see the PR description for pasted output). The `--full` GPU path and the
@@ -15,11 +23,12 @@ camera-ready detection/selection figures on a GPU via Google Colab.
 ## TL;DR
 
 1. Open `notebooks/colab_gpu.ipynb` in Colab. Set **Runtime → Change runtime type → GPU**
-   (a T4 is plenty for `3m` / `cramped_room`).
+   (a T4 is plenty for `cramped_room` / `asymm_advantages`).
 2. Run all cells. It clones the repo, installs **JAX 0.4.30 + CUDA 12**, runs a quick GPU
-   sanity check, then runs `run_benchmark.py --full` for SMAX and Overcooked.
-3. Figures are written to `code/results/m8_<env>_<experiment>_full.png` and can be
-   downloaded from the Colab file browser (or the last cell zips them).
+   sanity check, then runs `run_benchmark.py --full` for Overcooked (two layouts).
+3. Figures are written to `code/results/m8_<env>_<config>_<experiment>_full.png` (the layout
+   is folded into the name so layouts don't clobber) and can be downloaded from the Colab
+   file browser (or the last cell zips them).
 
 ## The JAX CUDA install (the part that bites)
 
@@ -54,7 +63,7 @@ Notes / gotchas:
 The harness prints its JAX backend on startup:
 
 ```
-=== run_benchmark: env=smax experiment=detection scale=full | jax backend=gpu ===
+=== run_benchmark: env=overcooked experiment=detection scale=full | jax backend=gpu ===
 ```
 
 If that says `cpu`, the CUDA `jaxlib` did not take — restart the runtime and re-run the
@@ -62,31 +71,30 @@ install cell. `jax.devices()` should list a `cuda`/`gpu` device.
 
 ## What `--full` runs
 
-`scripts/run_benchmark.py` is a config-driven dispatcher; `--full` swaps in GPU-scale
+`scripts/run_benchmark.py` is a config-driven dispatcher; `--full` swaps in full-scale
 budgets (the `SCALE` table in that file). The two camera-ready commands are:
 
 ```bash
-# SMAX detection (anytime-valid conformal martingale vs AES at matched false-alarm)
-python scripts/run_benchmark.py --env smax       --experiment detection --full --map-name 3m
-python scripts/run_benchmark.py --env smax       --experiment detection --full --map-name 2s3z
-
-# Overcooked detection
+# Overcooked detection (anytime-valid conformal martingale vs AES at matched false-alarm)
 python scripts/run_benchmark.py --env overcooked --experiment detection --full --layout cramped_room
+python scripts/run_benchmark.py --env overcooked --experiment detection --full --layout asymm_advantages
 ```
 
-Selection ablations (`--experiment selection`) work the same way; on the easily-learned
-envs selection is expected to be neutral-to-slower (see the `ablation.py` docstring), so the
-detection experiment is the headline on the heavy envs.
+Detection requires an unmasked / fixed-action-set env (see the SMAX note above), so
+Overcooked is the heavy detection env. Selection ablations (`--experiment selection`) work
+the same way; on the easily-learned envs selection is expected to be neutral-to-slower (see
+the `ablation.py` docstring), so detection is the headline.
 
 Each run writes:
 
-- `code/results/m8_<env>_detection_full.png` — committed-style figure (matched-false-alarm
-  calibration, detection-delay distributions, example traces).
-- `code/outputs/m8_<env>_detection_full.json` — raw numbers (gitignored).
+- `code/results/m8_<env>_<layout>_detection_full.png` — committed-style figure
+  (matched-false-alarm calibration, detection-delay distributions, example traces).
+- `code/outputs/m8_<env>_<layout>_detection_full.json` — raw numbers (gitignored).
 
 ## Approximate GPU cost
 
-On a Colab T4, `--full` SMAX `3m` detection (8 seeds × ~2M-step IQL + the Simu false-alarm
-lab + the swap streams) is on the order of tens of minutes; Overcooked `cramped_room` is
-similar. A smoke equivalent (`--smoke`) runs in CI-time on CPU and is what is verified in
-this PR. Scale the budgets in the `SCALE` table down if you only have a short session.
+On a Colab T4, `--full` Overcooked detection (8 seeds × the env's tuned IQL budget + the
+Simu false-alarm lab + the swap streams) is on the order of minutes per layout; the GPU's
+win is running the multi-seed sweep in parallel rather than a longer single train. A smoke
+equivalent (`--smoke`) runs in CI-time on CPU and is what is verified in this PR. Scale the
+budgets in the `SCALE` table down (or up) for your session.
