@@ -277,6 +277,32 @@ def _soft_update(target: Any, online: Any, tau: float) -> Any:
     return jax.tree_util.tree_map(lambda t, o: (1.0 - tau) * t + tau * o, target, online)
 
 
+def double_dqn_target(
+    q_next_online: chex.Array,
+    q_next_target: chex.Array,
+    next_avail: chex.Array,
+    reward: chex.Array,
+    done: chex.Array,
+    gamma: float,
+) -> chex.Array:
+    """Double-DQN bootstrap target, masked with the *next-state* available actions.
+
+    The online net picks the masked argmax at ``next_obs`` and the target net evaluates
+    it (the standard double-DQN decoupling). The mask is ``next_avail`` -- the legal set
+    at ``next_obs`` -- which is the correct mask whenever the action set changes between
+    steps (SMAX: units die / come into range). For unmasked / fixed-action-set envs the
+    caller passes an all-ones ``next_avail`` and this reduces to the plain target.
+
+    All arrays are over a flat ``(M,)`` row axis (the IQL loss flattens ``(B, N)`` agent
+    rows); ``q_next_*`` are ``(M, A)``, ``next_avail`` is ``(M, A)``, the rest ``(M,)``.
+    Returns the ``(M,)`` target ``r + gamma (1 - done) Q_target(s', argmax_a' Q_online)``.
+    Extracted from :func:`make_train`'s loss so the next-state masking is unit-testable.
+    """
+    next_greedy = _greedy_actions(jax.lax.stop_gradient(q_next_online), next_avail)
+    target_next_q = jnp.take_along_axis(q_next_target, next_greedy[:, jnp.newaxis], axis=-1)[:, 0]
+    return reward + gamma * (1.0 - done) * target_next_q
+
+
 # ---------------------------------------------------------------------- make_train
 def make_train(config: IQLConfig, env: Any) -> Callable[[chex.PRNGKey], dict]:
     """Build a pure ``train(rng) -> metrics`` closure for the given env/config.
@@ -414,6 +440,12 @@ def make_train(config: IQLConfig, env: Any) -> Callable[[chex.PRNGKey], dict]:
                 next_obs_ENA = jnp.stack([next_obs[a] for a in agents], axis=1)
                 reward_EN = jnp.stack([rewards[a] for a in agents], axis=1)
                 done_EN = jnp.stack([dones[a] for a in agents], axis=1)
+                # Available-action mask at the *next* state. For action-masked envs whose
+                # legal set changes between steps (SMAX: units die / come into range) this
+                # differs from ``avail_ENA`` (the mask at ``obs``) and is the mask the
+                # double-DQN target must use on Q(next_obs). For unmasked / fixed-action-set
+                # envs (Simu, MPE) it is all-ones == ``avail_ENA``, so nothing changes.
+                next_avail_ENA = _avail_batched(next_env_state)
                 transitions = Transition(
                     obs=obs_ENA,
                     actions=actions_EN.astype(jnp.int32),
@@ -421,6 +453,7 @@ def make_train(config: IQLConfig, env: Any) -> Callable[[chex.PRNGKey], dict]:
                     done=done_EN,
                     next_obs=next_obs_ENA,
                     avail_actions=avail_ENA,
+                    next_avail_actions=next_avail_ENA,
                     behavior_log_prob=logp_EN.astype(jnp.float32),
                     # Stored state (R2D2): ``hidden`` produced Q(obs) this step (post
                     # boundary-reset input carry); ``next_hidden`` is the post-step carry,
@@ -588,7 +621,11 @@ def make_train(config: IQLConfig, env: Any) -> Callable[[chex.PRNGKey], dict]:
             actions_BN = flat(batch.actions)
             reward_BN = flat(batch.reward)
             done_BN = flat(batch.done).astype(jnp.float32)
-            avail_BN = flat(batch.avail_actions)
+            # Only the *next*-state mask is needed by the loss: the chosen-action Q is a
+            # plain gather (no masking), and the bootstrap masks Q(next_obs) with
+            # ``next_avail`` (M8). The ``obs`` mask is still stored on the transition for the
+            # conformal score / samplers, just not consumed here.
+            next_avail_BN = flat(batch.next_avail_actions)
 
             zeros_resets = jnp.zeros((b * n,))
             # Stored-state recurrent TD: evaluate Q from the *stored* per-agent carries
@@ -614,17 +651,14 @@ def make_train(config: IQLConfig, env: Any) -> Callable[[chex.PRNGKey], dict]:
                 q_BNA, actions_BN[:, jnp.newaxis], axis=-1
             )[:, 0]
 
-            # Double-DQN target: online net argmax (masked), target net evaluates.
-            # NOTE next-state avail mask: in these envs every step is a fresh reset
-            # (Simu) or fixed action set (MPE), so reuse the stored mask. Stored mask
-            # is for `obs`; for masked next-state envs (SMAX, M5) store next-avail.
-            next_greedy_BN = _greedy_actions(
-                jax.lax.stop_gradient(q_next_online_BNA), avail_BN
+            # Double-DQN target masked with the *next-state* available actions
+            # (``next_avail_BN``), correct for envs whose action set changes between steps
+            # (SMAX). For unmasked / fixed-action-set envs ``next_avail_BN`` is all-ones
+            # == ``avail_BN``, so the target is identical. See ``double_dqn_target``.
+            target_BN = double_dqn_target(
+                q_next_online_BNA, q_next_target_BNA, next_avail_BN,
+                reward_BN, done_BN, cfg.gamma,
             )
-            target_next_q_BN = jnp.take_along_axis(
-                q_next_target_BNA, next_greedy_BN[:, jnp.newaxis], axis=-1
-            )[:, 0]
-            target_BN = reward_BN + cfg.gamma * (1.0 - done_BN) * target_next_q_BN
 
             td_err_BN = chosen_q_BN - jax.lax.stop_gradient(target_BN)
             se_BN = td_err_BN**2

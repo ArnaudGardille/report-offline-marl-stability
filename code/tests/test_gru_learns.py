@@ -151,6 +151,7 @@ def _gru_batch_with_hidden(key, b, num_agents, obs_dim, num_actions, hidden):
         actions=actions,
         behavior_log_prob=jnp.full((b, num_agents), jnp.log(0.5)),
         avail_actions=jnp.ones((b, num_agents, num_actions)),
+        next_avail_actions=jnp.ones((b, num_agents, num_actions)),
         reward=jnp.zeros((b, num_agents)),
         done=jnp.zeros((b, num_agents), dtype=jnp.bool_),
         hidden=jnp.asarray(h_BN),

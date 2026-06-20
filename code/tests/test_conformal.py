@@ -56,6 +56,7 @@ def _make_batch(key, m, num_agents, obs_dim, num_actions, past_p=0.5):
         actions=actions,
         behavior_log_prob=jnp.full((m, num_agents), jnp.log(past_p)),
         avail_actions=jnp.ones((m, num_agents, num_actions)),
+        next_avail_actions=jnp.ones((m, num_agents, num_actions)),
         reward=jnp.zeros((m, num_agents)),
         done=jnp.zeros((m, num_agents), dtype=jnp.bool_),
         next_obs=obs,
