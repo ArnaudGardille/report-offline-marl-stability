@@ -2,7 +2,7 @@
 %%% Do NOT edit. File created by BibTeX with style
 %%% ACM-Reference-Format-Journals [18-Jan-2012].
 
-\begin{thebibliography}{22}
+\begin{thebibliography}{23}
 
 %%% ====================================================================
 %%% NOTE TO THE USER: you can override these defaults by providing
@@ -171,6 +171,20 @@
   (ICML)}}.
 \newblock
 \showeprint[arxiv]{1803.11485}~[cs.LG]
+
+
+\bibitem[\protect\citeauthoryear{Rutherford, Ellis, Gallici, Foerster,
+  et~al\mbox{.}}{Rutherford et~al\mbox{.}}{2024}]%
+        {rutherford2024jaxmarl}
+\bibfield{author}{\bibinfo{person}{Alexander Rutherford},
+  \bibinfo{person}{Benjamin Ellis}, \bibinfo{person}{Matteo Gallici},
+  \bibinfo{person}{Jakob~Nicolaus Foerster}, {et~al\mbox{.}}}
+  \bibinfo{year}{2024}\natexlab{}.
+\newblock \showarticletitle{{JaxMARL}: Multi-Agent {RL} Environments and
+  Algorithms in {JAX}}. In \bibinfo{booktitle}{\emph{Advances in Neural
+  Information Processing Systems (NeurIPS), Datasets and Benchmarks Track}}.
+\newblock
+\showeprint[arxiv]{2311.10090}~[cs.LG]
 
 
 \bibitem[\protect\citeauthoryear{Samvelyan, Rashid, de~Witt, Farquhar,
