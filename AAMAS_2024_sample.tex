@@ -72,23 +72,28 @@ In off-policy multi-agent reinforcement learning (MARL), each agent perceives
 the other learners as part of its environment; as their policies drift, the
 perceived dynamics become non-stationary and previously collected transitions
 turn misleading. The usual remedy---shrinking the replay buffer---discards the
-sample efficiency that motivates off-policy learning in the first place. We
-recast the \emph{staleness} of a stored transition as a question of
-\emph{conformity} to the other agents' \emph{current} policies, and answer it
-with conformal prediction. We define a non-conformity score that measures how
-surprising a transition is under the agents' current policies---or, when those
-policies are unavailable, under a model of the currently perceived
-dynamics---calibrate it on fresh transitions, and obtain distribution-free
-$p$-values. These $p$-values serve two purposes: (i)~a large-batch-then-subsample
-\emph{selection} rule that biases learning towards transitions compatible with
-the present, generalising importance-ratio prioritisation to settings where the
-ratio is unavailable or numerically unstable; and (ii)~a conformal
-\emph{test martingale} that detects, with an anytime false-alarm guarantee via
-Ville's inequality, when the perceived environment has drifted enough to
-invalidate the buffer. We formalise the perceived best-response value that these
-schemes target, clarify the (self-normalised, deliberately biased) nature of
-ratio prioritisation, and study the approach on two controlled cooperative
-environments designed to isolate perceived non-stationarity.
+sample efficiency that motivates off-policy learning. We recast the
+\emph{staleness} of a stored transition as its \emph{conformity} to the other
+agents' \emph{current} policies and study it with conformal prediction: a
+distribution-free non-conformity score, calibrated on fresh transitions into
+$p$-values, measuring how surprising a transition is under the present (or, when
+policies are unavailable, under a model of the currently perceived dynamics).
+Three findings follow. \emph{Theory}: the value off-policy MARL targets is a
+perceived best-response value, and reweighting replay towards
+currently-compatible transitions computes the best response of a
+\emph{support-starved} perceived MDP---so naively \emph{filtering} for
+compatibility can move the fixed point away from the optimum by starving
+exploration, which we confirm empirically. \emph{Certified replay}: where the
+importance ratio is available, $\rho$-weighted conformal and time-decay
+calibration \emph{correct} the replay distribution with finite-sample guarantees
+instead of filtering it. \emph{Detection} (our most robust contribution): a
+conformal test martingale flags when the perceived environment has drifted, with
+an \emph{anytime} false-alarm guarantee via Ville's inequality, and drives a
+two-channel controller whose frozen alarm preserves the guarantee while an
+adaptive channel reads the drift rate; on standard cooperative benchmarks it
+detects co-learner drift faster than a TD-error heuristic at matched false-alarm,
+and the same martingale \emph{certifies} the replay correction. We study the
+approach on controlled environments built to isolate perceived non-stationarity.
 \end{abstract}
 
 \ccsdesc[500]{Computing methodologies~Multi-agent reinforcement learning}
@@ -133,8 +138,11 @@ The key observation of this paper is that \emph{old does not imply useless}. A
 stored transition is harmful only insofar as the joint action taken by the other
 agents in it is \emph{implausible under their current policies}. If their stored
 behaviour is still compatible with what they would do now, the transition is as
-informative as a fresh one. The problem of reusing the past therefore reduces to
-a problem of \emph{selecting transitions that conform to the present}.
+informative as a fresh one. The problem of reusing the past therefore becomes one
+of \emph{measuring each transition's conformity to the present}---and, as we will
+show, using that signal to \emph{detect} when the buffer has drifted and to
+\emph{correct} the replay distribution, rather than merely to \emph{filter} it,
+which can backfire by starving exploration.
 
 Prior work makes this concrete through an importance-sampling ratio between the
 current and past probabilities of the other agents'
@@ -148,23 +156,33 @@ prediction~\cite{vovk2005algorithmic,angelopoulos2023gentle}.
 
 \paragraph{Contributions.}
 \begin{enumerate}
-  \item We formalise the value that off-policy MARL implicitly targets as a
-  \emph{best-response value} against the other agents' current policies, and make
-  explicit the quasi-stationary approximation it relies on
-  (Section~\ref{sec:formulation}, Appendix~\ref{app:br}).
-  \item We give a corrected account of importance-ratio reweighting: the
-  change-of-measure identity and its support condition, the heavy-tailed
-  instability of direct loss correction, and the fact that ratio
-  \emph{prioritisation} is a \emph{self-normalised}, deliberately biased estimator
-  rather than an unbiased one (Section~\ref{sec:formulation}).
-  \item We introduce \emph{conformal replay}: a non-conformity score for stored
-  transitions, calibrated into $p$-values, used both to \emph{select} compatible
-  transitions (Section~\ref{sec:selection}) and to \emph{detect} drift of the
-  perceived environment through a conformal test martingale with an anytime
-  false-alarm guarantee (Section~\ref{sec:detection}).
-  \item We describe two controlled cooperative environments that isolate
-  perceived non-stationarity, and report the motivating evidence together with an
-  evaluation protocol (Section~\ref{sec:experiments}, Appendix~\ref{app:reward}).
+  \item \textbf{Theory.} We formalise the value off-policy MARL implicitly targets
+  as a \emph{perceived best-response value} under a quasi-stationary approximation
+  (Section~\ref{sec:formulation}, Appendix~\ref{app:br}), and prove a
+  \emph{support-starvation} result: reweighting replay towards currently-compatible
+  transitions computes the best response of a support-\emph{starved} perceived MDP,
+  matching the true best response only for exact-ratio soft weights with full
+  support---so naive compatibility \emph{filtering} can move the fixed point away
+  from the optimum (Theorem~\ref{thm:starvation}).
+  \item \textbf{Certified replay.} We give a corrected account of importance-ratio
+  reweighting (change-of-measure and its support condition, the heavy-tailed
+  instability of direct loss correction, and the self-normalised nature of ratio
+  prioritisation), and turn it into \emph{calibrated} corrections with
+  finite-sample validity---$\rho$-weighted conformal $p$-values and time-decay
+  calibration---that \emph{correct} the replay distribution rather than merely
+  filter it (Sections~\ref{sec:formulation}, \ref{sec:method}).
+  \item \textbf{Detection (headline).} We introduce a conformal \emph{test
+  martingale} that detects drift of the perceived environment with an \emph{anytime}
+  false-alarm guarantee via Ville's inequality, and a two-channel controller whose
+  frozen channel preserves that guarantee while an adaptive channel reads the drift
+  rate (Section~\ref{sec:detection}). The same martingale \emph{certifies} the
+  replay correction---its growth rate bounds the selector's coverage gap
+  (Lemma~\ref{lem:certify}).
+  \item \textbf{Experiments.} On a diagnostic bandit and standard cooperative
+  JaxMARL benchmarks, compatibility \emph{selection} starves exploration (confirming
+  Theorem~\ref{thm:starvation}), whereas \emph{detection} flags co-learner drift
+  faster than a TD-error heuristic at matched false-alarm
+  (Section~\ref{sec:experiments}).
 \end{enumerate}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
