@@ -14,7 +14,7 @@
 \usepackage{algorithm}
 \usepackage{algpseudocode}
 
-\graphicspath{{imgs/}{imgs/results/}{imgs/new_results/}{imgs/logo/}}
+\graphicspath{{imgs/}{imgs/results/}{imgs/new_results/}{imgs/logo/}{code/results/}}
 
 %%% AAMAS-2024 copyright block (do not change!)
 \setcopyright{ifaamas}
@@ -651,31 +651,17 @@ anytime-valid object. In this precise sense, \emph{detection certifies selection
 \section{Experiments}
 \label{sec:experiments}
 
-\subsection{Two environments that isolate the phenomenon}
-Rather than benchmarking on SMAC~\cite{samvelyan2019starcraft}, which entangles
-many factors, we use two minimal cooperative environments built so that episodic
-return is a clean measure of coordination.
-
-\paragraph{Water-Bomber.} A $5\times3$ grid with two water-bomber agents and
-fires appearing at random. An agent moves in four directions or fights a fire it
-stands on; \emph{unavailable actions are masked}. The team receives a shared
-reward only once \emph{all} fires are being extinguished, scaled so that an
-optimal policy reaches return $1$. The environment requires genuine spatial
-coordination (Figure~\ref{fig:water}), and---because actions are masked---it is a
-setting where the importance ratio $\rho$ can lose support
-(Section~\ref{sec:ratio}).
-
-\begin{figure}[t]
-  \centering
-  \includegraphics[width=0.74\linewidth]{water_illlu.png}
-  \caption{Water-Bomber. Two agents must extinguish all fires; the shared reward
-  is granted only when every fire is covered, so the optimal joint behaviour
-  (green) often requires one agent to take a longer route to free the other,
-  rather than both rushing the nearest fire (red).}
-  \label{fig:water}
-  \Description{Two water-bomber agents and two fires on a grid; arrows show a
-  coordinated assignment of agents to fires versus a greedy one.}
-\end{figure}
+\subsection{Environments}
+\label{sec:envs}
+All environments are implemented in JAX, so every method runs inside a single
+\texttt{lax.scan} training loop vectorised across seeds. A custom one-step bandit
+isolates the mechanism; three cooperative JaxMARL~\cite{rutherford2024jaxmarl}
+benchmarks place it in standard settings. The drift-\emph{detection} experiments
+use a fixed partner-swap intervention and a calibration set that both assume a
+state-independent action set, so they run on the unmasked envs
+(Simultaneous-Attack, MPE, Overcooked); SMAX---whose legal actions are
+state-dependent---instead exercises the masked-action training target
+(Section~\ref{sec:ratio}) and the selection ablation.
 
 \paragraph{Simultaneous-Attack.} A one-step, single-state bandit with $N$ agents
 and two actions, \emph{attack} or \emph{abstain}. Attacking together succeeds;
@@ -699,66 +685,104 @@ all-attack optimum gets $1$ (proof in Appendix~\ref{app:reward}). Coordination i
 exponentially rare under random play, so the buffer fills with ``failed''
 transitions whose value depends entirely on whether teammates would still attack.
 
-\subsection{Protocol.} We use an IQL agent implemented from scratch (PyTorch,
-with TorchRL replay buffers), a dueling network for Water-Bomber, $\epsilon$
-annealed from $0.99$ to $0.05$, and results averaged over multiple seeds (100 for
-Simultaneous-Attack, 10 for Water-Bomber). For each method we report
-\emph{average optimality} (normalised return) against environment steps.
+\paragraph{MPE \texttt{simple\_spread}.} The standard cooperative-navigation
+benchmark~\cite{lowe2017multi} (agents spread to cover landmarks): a multi-state,
+partially observable setting in which the perceived dynamics genuinely shift when a
+teammate's policy changes---our drift-detection testbed.
 
-\subsection{Findings.}
-\paragraph{The problem is real (motivation).} Growing the replay buffer (with the
-batch size scaled accordingly) helps \emph{only up to a point} and then
-\emph{hurts}, as old transitions become inconsistent with the others' current
-policies (Figure~\ref{fig:buffer}). A small buffer avoids the issue but forfeits
-sample efficiency---the dilemma this paper targets.
+\paragraph{SMAX.} The {StarCraft}-style micromanagement
+challenge~\cite{samvelyan2019starcraft} reimplemented in JAX, with
+\emph{state-dependent action masks}---the regime in which $\rho$ loses support
+(Section~\ref{sec:ratio}). It carries the masked-action double-$Q$ target and the
+selection ablation.
 
-\paragraph{Selection by compatibility helps; raw ratio correction is unstable.}
-On both environments, biasing replay towards transitions compatible with the
-others' current policies improves sample efficiency over uniform sampling and
-over TD-based prioritisation (PER, LaBER), while \emph{directly} multiplying the
-loss by $\rho$ destabilises training---the importance ratio spikes
-(Figure~\ref{fig:ratios}), confirming the analysis of Section~\ref{sec:ratio}.
-The explicit-ratio selection of \cite{foerster2017stabilising} is the special
-case of Algorithm~\ref{alg:select} with $A=-\log\rho$; replacing the ratio by the
-calibrated conformal score is what extends the method to masked actions and to
-settings where $\rho$ is unavailable. The ratio-free conformal instantiation and
-the martingale-triggered buffer refresh (Algorithm~\ref{alg:detect}) are the
-contributions under active evaluation; we report the protocol above so the
-comparison is reproducible.
+\paragraph{Overcooked.} A fully-cooperative coordination benchmark in which a
+scripted \emph{partner swap} at a known step injects a controlled drift event.
+
+\subsection{Protocol}
+\label{sec:protocol}
+The backbone is an IQL agent in JAX on top of JaxMARL---a recurrent $Q$-network
+with a Flashbax replay buffer, trained with the PureJaxRL
+\texttt{scan}+\texttt{vmap} recipe so all seeds run in one compiled call;
+$\epsilon$ is annealed from $0.99$ to $0.05$. Replay sampling is a swappable
+module---\textsc{uniform}, PER, LaBER, exact-ratio ($A=-\log\rho$), and the
+conformal policy/model scores---over a shared loop, so ablations differ only in the
+sampler. Conformal scores are calibrated on a fresh on-policy hold-out; the drift
+martingale uses the $\varepsilon$-grid mixture at level $\delta=0.05$. We report
+\emph{average optimality} (normalised return) for selection and \emph{detection
+delay at matched false-alarm} for detection, over $8$ seeds (more on the cheap
+bandit), with inter-seed spread shaded.
+
+\subsection{Findings}
+\paragraph{Selection by compatibility starves exploration---the negative that
+proves the theory.} On Simultaneous-Attack, \textsc{uniform} replay reaches the
+optimum on \emph{every} seed at buffer sizes $\{2\mathrm{k},50\mathrm{k},
+200\mathrm{k}\}$, whereas compatibility selection---the ratio-free conformal score
+\emph{and} the exact ratio $A=-\log\rho$ alike---\emph{collapses} a fraction of
+seeds (mean optimality $\approx0.66$ and $0.57$, bimodal; Figure~\ref{fig:starv}).
+The conformal machinery is not at fault: the $p$-values are super-uniform under
+$H_0$ (Kolmogorov--Smirnov statistic $\approx0.006$). The cause is precisely
+Theorem~\ref{thm:starvation}(iii)---keeping only currently-likely joint actions
+deletes the rare exploratory all-attack transitions needed to escape the
+all-abstain consensus, so the reward-bearing action leaves $\mathcal{S}_w$.
+Selection-\emph{by-filtering} is thus not the contribution; its certified,
+support-preserving forms are (below).
+
+\paragraph{Detection is the robust contribution.} The two-channel controller pairs
+a \emph{frozen} calibration channel---whose Ville alarm preserves the anytime
+false-alarm guarantee---with an adaptive channel that reads the log-wealth slope
+$\mathrm{d}\log M_t/\mathrm{d}t$ ($\approx$ the KL drift rate) to drive the buffer
+half-life. On MPE \texttt{simple\_spread}, after a controlled partner-policy swap,
+the conformal martingale detects $8/8$ seeds with a tight delay (mean $25.5$ steps)
+at \emph{zero} false alarms, using a \emph{single threshold transferred} from the
+Simultaneous-Attack false-alarm lab; the TD-error heuristic AES, held to that same
+threshold, is erratic and misses seeds (Figure~\ref{fig:det-mpe}). The Overcooked
+partner-swap corroborates this at a smaller training budget (Figure~\ref{fig:det-oc}).
+
+\paragraph{Certified replay recovers what filtering loses.} Where $\rho$ is
+available, $\rho$-weighted conformal $p$-values~\cite{tibshirani2019conformal} give
+the exact-ratio score its first finite-sample validity under the known co-action
+shift---the ``missing middle'' between the ratio-free heuristic and raw importance
+sampling---and time-decay NexCP~\cite{barber2023beyond} turns Foerster's heuristic
+discount of stale data into one whose one-sided coverage gap vanishes with the
+drift. On synthetic shifts both are super-uniform, with coverage tending to the
+nominal level as drift$\,\to0$, matching Lemma~\ref{lem:certify}.
 
 \begin{figure}[t]
   \centering
-  \includegraphics[width=0.74\linewidth]{scheme_final.png}
-  \caption{Large-batch-then-subsample replay. A large batch is drawn, each
-  transition is scored, and a mini-batch is subsampled towards transitions
-  compatible with the others' current policies. The importance ratio $\rho$ is
-  one possible score; conformal replay replaces it by a calibrated, ratio-free
-  non-conformity score.}
-  \label{fig:scheme}
-  \Description{Top: a large batch sampled uniformly from the replay buffer.
-  Bottom: a smaller batch subsampled according to a per-transition score.}
+  \includegraphics[width=0.84\linewidth]{m6_support_starvation_collapse.png}
+  \caption{Support starvation (Simultaneous-Attack). \textsc{uniform} replay
+  reaches the optimum on every seed; compatibility selection collapses a fraction
+  of seeds by deleting the rare exploratory transitions that carry the reward
+  (Theorem~\ref{thm:starvation}(iii)). Shaded band: inter-seed spread.}
+  \label{fig:starv}
+  \Description{Average optimality versus steps: uniform converges to one on all
+  seeds while conformal selection is bimodal with several collapsed seeds.}
 \end{figure}
 
 \begin{figure}[t]
   \centering
-  \includegraphics[width=0.92\linewidth]{buffer-water.png}
-  \caption{Motivation (Water-Bomber): increasing the replay-buffer size first
-  improves then degrades performance, as stale transitions accumulate. The shaded
-  band is the inter-seed spread.}
-  \label{fig:buffer}
-  \Description{Average optimality versus training steps for several buffer sizes;
-  the largest buffer eventually underperforms an intermediate one.}
+  \includegraphics[width=0.92\linewidth]{m8_detection_mpe.png}
+  \caption{Drift detection on MPE \texttt{simple\_spread} after a partner swap.
+  With a single threshold transferred from the bandit false-alarm lab, the
+  conformal martingale detects $8/8$ seeds (mean delay $25.5$) at zero false
+  alarms; the AES TD-error heuristic, at the same threshold, misses seeds.}
+  \label{fig:det-mpe}
+  \Description{Detection-delay distributions and example martingale traces; the
+  conformal wealth crosses the Ville threshold shortly after the swap on every
+  seed.}
 \end{figure}
 
 \begin{figure}[t]
   \centering
-  \includegraphics[width=0.86\linewidth]{ratios.png}
-  \caption{The importance ratio $\rho$ is heavy-tailed and occasionally huge,
-  which makes direct loss correction explode. Conformal calibration uses only the
-  \emph{rank} of the score and is immune to this.}
-  \label{fig:ratios}
-  \Description{Time series of the importance ratio showing rare but very large
-  spikes.}
+  \includegraphics[width=0.86\linewidth]{m5_detection_vs_aes.png}
+  \caption{Two-channel controller on the Overcooked partner-swap: the frozen
+  Ville-alarm channel (anytime false-alarm $\le\delta$) versus AES at matched
+  false-alarm, with the adaptive channel's drift-rate estimate. Corroborates
+  Figure~\ref{fig:det-mpe} at a smaller budget.}
+  \label{fig:det-oc}
+  \Description{Detection delay of the conformal controller versus AES on
+  Overcooked, plus the log-wealth slope tracking the injected drift.}
 \end{figure}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
