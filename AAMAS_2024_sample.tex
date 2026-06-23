@@ -170,7 +170,7 @@ prediction~\cite{vovk2005algorithmic,angelopoulos2023gentle}.
   prioritisation), and turn it into \emph{calibrated} corrections with
   finite-sample validity---$\rho$-weighted conformal $p$-values and time-decay
   calibration---that \emph{correct} the replay distribution rather than merely
-  filter it (Sections~\ref{sec:formulation}, \ref{sec:method}).
+  filter it (Sections~\ref{sec:formulation}, \ref{sec:certified}).
   \item \textbf{Detection (headline).} We introduce a conformal \emph{test
   martingale} that detects drift of the perceived environment with an \emph{anytime}
   false-alarm guarantee via Ville's inequality, and a two-channel controller whose
@@ -553,6 +553,32 @@ Otherwise the threshold is tuned on nominal trajectories for an acceptable
 empirical false-alarm rate. We report which regime we are in rather than claiming
 the strongest one by default.
 
+\subsection{Use 3: Certifying a replayed batch under a known shift}
+\label{sec:certified}
+The $p$-values of \eqref{eq:pvalue} are valid only while the calibration set is
+exchangeable with the scored transitions. When the others' policies have
+\emph{measurably} shifted---after the detector of Section~\ref{sec:detection}
+fires, or whenever the ratio $\rho$ is itself available---we can \emph{certify}
+validity rather than assume it, with two classical corrections that transfer
+directly to the replay stream. \emph{(i) Covariate-shift weighting.} If the shift
+is captured by a likelihood ratio $w=\rho=\picur/\pipast$, the \emph{weighted}
+conformal $p$-value~\cite{tibshirani2019conformal}
+\begin{equation}
+\label{eq:weighted-p}
+p_i=\sum_{j}\tilde w_j\,\indic{A^{\mathrm{cal}}_j\ge A_i}+\tilde w_{\mathrm{test}},
+\qquad
+\tilde w_j=\frac{w_j}{\textstyle\sum_k w_k+w_{\mathrm{test}}},
+\end{equation}
+restores super-uniformity with respect to the \emph{shifted} (current) law.
+\emph{(ii) Time-decay (NexCP).} When the drift is gradual and the ratio is
+unavailable, geometric weights $w_i=\rho_{\mathrm{decay}}^{\,n-i}$ that
+down-weight older calibration points give the non-exchangeable conformal
+$p$-value of \citet{barber2023beyond}, whose coverage obeys the one-sided
+guarantee $\text{miscoverage}\le\alpha+\sum_i\tilde w_i\,\dTV_i$. Both keep the
+selection and detection machinery \emph{certified} under quantified drift---the
+constructive counterpart of the coverage gap bounded in
+Section~\ref{sec:theory}---and we validate them in Section~\ref{sec:experiments}.
+
 \subsection{Theoretical analysis: when selection starves, and how detection
 certifies it}
 \label{sec:theory}
@@ -733,29 +759,44 @@ bandit), with inter-seed spread shaded.
 
 \subsection{Findings}
 \paragraph{Selection by compatibility starves exploration---the negative that
-proves the theory.} On Simultaneous-Attack, \textsc{uniform} replay reaches the
-optimum on \emph{every} seed at buffer sizes $\{2\mathrm{k},50\mathrm{k},
-200\mathrm{k}\}$, whereas compatibility selection---the ratio-free conformal score
-\emph{and} the exact ratio $A=-\log\rho$ alike---\emph{collapses} a fraction of
-seeds (mean optimality $\approx0.66$ and $0.57$, bimodal; Figure~\ref{fig:starv}).
-The conformal machinery is not at fault: the $p$-values are super-uniform under
-$H_0$ (Kolmogorov--Smirnov statistic $\approx0.006$). The cause is precisely
-Theorem~\ref{thm:starvation}(iii)---keeping only currently-likely joint actions
-deletes the rare exploratory all-attack transitions needed to escape the
-all-abstain consensus, so the reward-bearing action leaves $\mathcal{S}_w$.
-Selection-\emph{by-filtering} is thus not the contribution; its certified,
-support-preserving forms are (below).
+proves the theory.} On Simultaneous-Attack ($N=3$), \textsc{uniform} replay reaches
+the optimum on \emph{every} seed at buffer sizes $\{2\mathrm{k},50\mathrm{k},
+200\mathrm{k}\}$ (final optimality $1.00$), whereas compatibility selection
+\emph{collapses} a fraction of seeds: the ratio-free conformal score falls to
+$0.66\pm0.49$ and even the exact ratio $A=-\log\rho$ to $0.57\pm0.51$, both bimodal
+($12$ seeds; Figure~\ref{fig:starv}). The conformal machinery is not at fault---the
+$p$-values are super-uniform under $H_0$ (Kolmogorov--Smirnov statistic
+$\approx0.006$); the cause is precisely Theorem~\ref{thm:starvation}(iii), as
+deleting the rare exploratory all-attack transitions pushes the reward-bearing
+action out of $\mathcal{S}_w$. We confirm the theorem's \emph{iff} structure
+directly ($16$ seeds, support floor $0.3$; Figure~\ref{fig:starv-iff}): selection
+recovers the optimum ($1.00$, $0/16$ collapse) \emph{only} when the exact-ratio
+score \emph{and} a support floor both hold; dropping either returns to $0.75$
+($4/16$)---isolating the theorem's two conditions and ruling out a trivial
+``a floor fixes everything'' reading. Across samplers the per-seed correlation
+between surviving all-attack mass and final return is $+0.998$. Selection
+\emph{by filtering} is thus not the contribution; its certified, support-preserving
+forms are (below).
 
 \paragraph{Detection is the robust contribution.} The two-channel controller pairs
 a \emph{frozen} calibration channel---whose Ville alarm preserves the anytime
 false-alarm guarantee---with an adaptive channel that reads the log-wealth slope
 $\mathrm{d}\log M_t/\mathrm{d}t$ ($\approx$ the KL drift rate) to drive the buffer
-half-life. On MPE \texttt{simple\_spread}, after a controlled partner-policy swap,
-the conformal martingale detects $8/8$ seeds with a tight delay (mean $25.5$ steps)
-at \emph{zero} false alarms, using a \emph{single threshold transferred} from the
-Simultaneous-Attack false-alarm lab; the TD-error heuristic AES, held to that same
-threshold, is erratic and misses seeds (Figure~\ref{fig:det-mpe}). The Overcooked
-partner-swap corroborates this at a smaller training budget (Figure~\ref{fig:det-oc}).
+half-life. The frozen channel is anytime-valid in practice: over $20{,}000$ null
+streams the empirical \emph{ever}-cross rate is $0.040$ at $\delta=0.1$ and $0.019$
+at $\delta=0.05$, at or below the Ville bound~\eqref{eq:ville}. On MPE
+\texttt{simple\_spread}, after a controlled partner-policy swap, the conformal
+martingale detects $8/8$ seeds at delay $21$--$29$ (mean $25.5$) at \emph{zero}
+false alarms, using a \emph{single threshold transferred} from the
+Simultaneous-Attack false-alarm lab. The TD-error heuristic
+AES~\cite{wang2026tracking}, held to that \emph{same} transferable threshold, fires
+in only $4/8$ seeds; with a task-local reference it fires in $0/8$, and only under
+full per-environment recalibration does it reach $6/8$---then slowly (median delay
+$86$) and still missing two seeds (Figure~\ref{fig:det-mpe}). Conformal detection
+thus pairs an anytime guarantee with a threshold that \emph{transfers}, the
+asymmetry Lemma~\ref{lem:certify} anticipates. The Overcooked partner-swap
+corroborates this ($7/8$, median delay ${\approx}120$) at a smaller training budget
+(Figure~\ref{fig:det-oc}).
 
 \paragraph{Certified replay recovers what filtering loses.} Where $\rho$ is
 available, $\rho$-weighted conformal $p$-values~\cite{tibshirani2019conformal} give
@@ -763,8 +804,15 @@ the exact-ratio score its first finite-sample validity under the known co-action
 shift---the ``missing middle'' between the ratio-free heuristic and raw importance
 sampling---and time-decay NexCP~\cite{barber2023beyond} turns Foerster's heuristic
 discount of stale data into one whose one-sided coverage gap vanishes with the
-drift. On synthetic shifts both are super-uniform, with coverage tending to the
-nominal level as drift$\,\to0$, matching Lemma~\ref{lem:certify}.
+drift. On controlled score streams with a \emph{known} shift the gains are exact:
+under a covariate shift the ordinary inductive $p$-value is badly miscalibrated
+($\mathbb{P}(p\le0.05)=0.26$, a $5.2\times$ inflation), whereas the
+$\rho$-weighted $p$-value~\eqref{eq:weighted-p} restores it to $0.04$ (mean $p$:
+$0.24\!\to\!0.50$); for a gradually drifting stream, plain exchangeable conformal
+under-covers at $30.5\%$ against the $80\%$ nominal while time-decay NexCP
+weighting restores $85.8\%$, the one-sided bound holding throughout. Both are
+super-uniform with coverage tending to the nominal level as drift$\,\to0$, matching
+Lemma~\ref{lem:certify}.
 
 \begin{figure}[t]
   \centering
@@ -776,6 +824,19 @@ nominal level as drift$\,\to0$, matching Lemma~\ref{lem:certify}.
   \label{fig:starv}
   \Description{Average optimality versus steps: uniform converges to one on all
   seeds while conformal selection is bimodal with several collapsed seeds.}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.92\linewidth]{m6_support_starvation_iff.png}
+  \caption{The theorem's two conditions, isolated ($16$ seeds). Final optimality is
+  $1.0$ only for \textsc{uniform} and for exact-ratio reweighting \emph{with} a
+  support floor (both conditions met); dropping the exact ratio (policy floor) or
+  the floor (exact ratio alone) returns to $0.75$. Support coverage \emph{and} the
+  exact ratio are each necessary.}
+  \label{fig:starv-iff}
+  \Description{Bar chart of final optimality for five samplers; only uniform and
+  exact-ratio-plus-floor reach 1.0.}
 \end{figure}
 
 \begin{figure}[t]
@@ -830,24 +891,28 @@ follows from Ville's inequality~\cite{ville1939etude,ramdas2023gametheoretic}.
 \label{sec:conclusion}
 We recast the reuse of past experience in off-policy MARL as a question of
 \emph{conformity to the present} and answered it with conformal prediction. A
-single non-conformity score, calibrated into distribution-free $p$-values, both
-selects replay transitions that match the other agents' current policies and,
-through a conformal test martingale, detects when the perceived environment has
-drifted---with an anytime false-alarm guarantee. The construction generalises
-importance-ratio reweighting to the realistic cases (masking, partial
-observability, continuous actions, black-box teammates) where the ratio is
-unavailable or unstable, and we were careful to state what it does and does not
-correct.
+single non-conformity score, calibrated into distribution-free $p$-values,
+\emph{detects} drift of the perceived environment through a conformal test
+martingale---with an anytime false-alarm guarantee and a threshold that transfers
+across environments---and \emph{certifies} the replayed batch under a quantified
+shift via weighted and time-decayed $p$-values. The same score can also
+\emph{select} compatible transitions, but here our message is deliberately
+cautionary: we prove, and confirm empirically, that outside the exact-ratio
+regime selection starves the support it needs and underperforms uniform replay.
+Detection and certification are thus the robust contributions; selection is safe
+only in the narrow regime where it coincides with the (often unavailable)
+importance ratio.
 
 \balance
 
-Several directions remain. The state-visitation mismatch is untouched and could
-be addressed with state-conditional (Mondrian) calibration or with corrections
-on $d(s)$. Validity in the dependent RL stream deserves a dedicated analysis,
-possibly via e-processes~\cite{ramdas2023gametheoretic}. Finally, the partially
-observable setting---where policies condition on histories and the model-based
-score~\eqref{eq:score-model} is most useful---is the natural next benchmark,
-together with value-decomposition backbones (VDN, QMIX) on SMAC.
+Several directions remain. The immediate next step is full-scale convergence on
+the masked / partially observable testbeds---SMAX and Overcooked---where the
+importance ratio loses support and our stored-state GRU detector already runs;
+these runs are GPU-bound and in progress. The state-visitation mismatch is
+untouched and could be addressed with state-conditional (Mondrian) calibration or
+corrections on $d(s)$; validity in the dependent RL stream deserves a dedicated
+analysis via e-processes~\cite{ramdas2023gametheoretic}; and value-decomposition
+backbones such as VDN and QMIX inherit the same per-agent score unchanged.
 
 \begin{acks}
 Anonymised for review.
