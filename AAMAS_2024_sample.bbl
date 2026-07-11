@@ -2,7 +2,7 @@
 %%% Do NOT edit. File created by BibTeX with style
 %%% ACM-Reference-Format-Journals [18-Jan-2012].
 
-\begin{thebibliography}{23}
+\begin{thebibliography}{24}
 
 %%% ====================================================================
 %%% NOTE TO THE USER: you can override these defaults by providing
@@ -339,6 +339,20 @@
   \bibinfo{booktitle}{\emph{International Conference on Machine Learning
   (ICML)}}. \bibinfo{pages}{768--775}.
 \newblock
+
+
+\bibitem[\protect\citeauthoryear{Wang, Xia, Chen, and Liu}{Wang
+  et~al\mbox{.}}{2026}]%
+        {wang2026tracking}
+\bibfield{author}{\bibinfo{person}{Tongxi Wang}, \bibinfo{person}{Zhuoyang
+  Xia}, \bibinfo{person}{Xinran Chen}, {and} \bibinfo{person}{Shan Liu}.}
+  \bibinfo{year}{2026}\natexlab{}.
+\newblock \showarticletitle{Tracking Drift: Variation-Aware Entropy Scheduling
+  for Non-Stationary Reinforcement Learning}.
+\newblock \bibinfo{journal}{\emph{arXiv preprint arXiv:2601.19624}}
+  (\bibinfo{year}{2026}).
+\newblock
+\showeprint[arxiv]{2601.19624}~[cs.LG]
 
 
 \bibitem[\protect\citeauthoryear{Yu, Velu, Vinitsky, Gao, Wang, Bayen, and
