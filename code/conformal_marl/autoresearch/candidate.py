@@ -9,6 +9,11 @@ from __future__ import annotations
 import numpy as np
 
 from conformal_marl.autoresearch.api import Estimate, OperatorBatch
+from conformal_marl.samplers import (
+    SamplerContext,
+    register_sampler,
+    uniform_sampler,
+)
 
 
 def estimate_operator(batch: OperatorBatch, rng: np.random.Generator) -> Estimate:
@@ -16,3 +21,10 @@ def estimate_operator(batch: OperatorBatch, rng: np.random.Generator) -> Estimat
 
     del rng
     return Estimate(value=float(np.mean(batch.outcomes)))
+
+
+@register_sampler("autoresearch_candidate")
+def sample_replay(buffer, buffer_state, rng, ctx: SamplerContext, batch_size: int):
+    """Learning-tier baseline: preserve the existing uniform replay behaviour."""
+
+    return uniform_sampler(buffer, buffer_state, rng, ctx, batch_size)

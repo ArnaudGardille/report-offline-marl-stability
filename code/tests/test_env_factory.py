@@ -14,7 +14,7 @@ shape-checked* in CI; their short ``make_train`` run is marked ``slow`` (opt in 
 ``pytest -m slow``) so the default suite stays snappy -- the milestone explicitly allows
 slow-skipping the heavy ones as long as they still instantiate.
 
-The known-incompatible envs (Coin-Game / STORM: non-per-agent obs or reward APIs) are
+The known-incompatible env (Coin-Game: non-per-agent reward/done API) is
 asserted to raise a clear ``NotImplementedError`` rather than fail deep inside training.
 """
 
@@ -30,6 +30,7 @@ from conformal_marl.envs.registry import (
     AvailActionsWrapper,
     EnvSpec,
     FlatObs,
+    StormAdapter,
     available_envs,
     make_env,
 )
@@ -44,6 +45,7 @@ LIGHT_ENVS = [
     "overcooked",
     "hanabi",
     "switch_riddle",
+    "storm",
 ]
 SMAX_ENVS = ["SMAX", "HeuristicEnemySMAX"]
 
@@ -122,7 +124,7 @@ def test_smax_make_train_runs(name: str):
 
 @pytest.mark.parametrize("name", INCOMPATIBLE_ENVS)
 def test_incompatible_envs_raise(name: str):
-    """Coin-Game / STORM are known-incompatible: the factory raises, not the loop."""
+    """Known-incompatible envs fail at the factory boundary, not in the IQL loop."""
     with pytest.raises(NotImplementedError):
         make_env(name)
 
@@ -136,8 +138,30 @@ def test_unknown_env_raises():
 def test_available_envs_lists_targets():
     """The registry advertises the targeted discrete catalogue."""
     envs = available_envs()
-    for expected in ["simu", "MPE_simple_spread_v3", "SMAX", "overcooked", "hanabi", "switch_riddle"]:
+    for expected in [
+        "simu", "MPE_simple_spread_v3", "SMAX", "overcooked", "hanabi",
+        "switch_riddle", "storm",
+    ]:
         assert expected in envs
+
+
+def test_storm_adapter_exposes_cooperative_per_agent_contract():
+    """STORM tuples become flat per-agent dicts with shared cooperative rewards."""
+    env, spec = make_env("storm", num_inner_steps=8)
+    assert isinstance(env, StormAdapter)
+    obs, state = env.reset(jax.random.PRNGKey(0))
+    assert set(obs) == set(env.agents)
+    assert all(value.shape == (spec.obs_dim,) for value in obs.values())
+    assert all(value.dtype == np.float32 for value in obs.values())
+
+    actions = {agent: np.int32(0) for agent in env.agents}
+    next_obs, _, rewards, dones, _ = env.step_env(
+        jax.random.PRNGKey(1), state, actions
+    )
+    assert set(next_obs) == set(env.agents)
+    assert set(rewards) == set(env.agents)
+    assert rewards[env.agents[0]] == rewards[env.agents[1]]
+    assert set(dones) == {*env.agents, "__all__"}
 
 
 def test_config_overrides_applied():

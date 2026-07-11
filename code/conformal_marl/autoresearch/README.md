@@ -27,3 +27,17 @@ scenarios, so higher is better. Scenario-level bias, variance, and MSE remain av
 for diagnosis. Later learning tiers must preserve the same separation: candidates may
 change replay or target estimation, never environments, rewards, seeds, budgets, or score
 calculation.
+
+The second tier performs paired-seed IQL training on cooperative STORM and
+Simultaneous-Attack:
+
+```bash
+uv run python -m conformal_marl.autoresearch.evaluate \
+  --tier learning \
+  --num-seeds 8 \
+  --output outputs/autoresearch_learning.json
+```
+
+Its score is a lower confidence bound on paired AUC/final-return improvement over
+uniform replay. Simultaneous-Attack is a support-preservation gate, not a target to game:
+a candidate with a material regression there is rejected even if it improves STORM.
