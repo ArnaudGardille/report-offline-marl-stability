@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -55,7 +56,9 @@ def build_search_config(
     repository = repository.resolve()
     orchestrator = orchestrator.resolve()
     task_context_file = task_context_file.resolve()
-    shared_python = shared_python.resolve()
+    # Preserve the virtualenv executable path. Resolving its symlink points at uv's
+    # bare CPython installation, which no longer discovers the venv site-packages.
+    shared_python = Path(os.path.abspath(shared_python))
     candidate = repository / "code/conformal_marl/autoresearch/candidate"
     launcher = orchestrator / "launch_hierarchical_campaign.py"
 

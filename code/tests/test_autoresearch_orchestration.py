@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -53,13 +52,15 @@ def _init_fixture(tmp_path: Path) -> tuple[Path, Path, Path]:
 
 def test_build_search_config_uses_absolute_paths_and_staged_gate(tmp_path: Path):
     repo, orchestrator, context = _init_fixture(tmp_path)
+    shared_python = tmp_path / "venv-python"
+    shared_python.write_text("")
     config = build_search_config(
         repository=repo,
         orchestrator=orchestrator,
         base_ref="HEAD",
         output_dir=tmp_path / "results",
         task_context_file=context,
-        shared_python=Path(sys.executable),
+        shared_python=shared_python,
         max_nodes=4,
         initial_capacity=2,
         learning_seeds=3,
@@ -70,6 +71,7 @@ def test_build_search_config_uses_absolute_paths_and_staged_gate(tmp_path: Path)
     assert Path(config["repository"]).is_absolute()
     assert Path(config["task_context_file"]).is_absolute()
     assert Path(config["shared_python"]).is_absolute()
+    assert config["shared_python"] == str(shared_python)
     assert [stage["name"] for stage in config["stages"]] == [
         "operator", "mechanism", "learning"
     ]
@@ -91,6 +93,8 @@ def test_build_search_config_uses_absolute_paths_and_staged_gate(tmp_path: Path)
 
 def test_build_search_config_rejects_unknown_ref(tmp_path: Path):
     repo, orchestrator, context = _init_fixture(tmp_path)
+    shared_python = tmp_path / "venv-python"
+    shared_python.write_text("")
     with pytest.raises(ValueError, match="does not exist"):
         build_search_config(
             repository=repo,
@@ -98,5 +102,5 @@ def test_build_search_config_rejects_unknown_ref(tmp_path: Path):
             base_ref="missing-branch",
             output_dir=tmp_path / "results",
             task_context_file=context,
-            shared_python=Path(sys.executable),
+            shared_python=shared_python,
         )
