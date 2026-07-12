@@ -117,6 +117,7 @@ def build_search_config(
                     "{python}", "-m",
                     "conformal_marl.autoresearch.evaluate",
                     "--tier", "mechanism", "--trials", "32",
+                    "--mechanism-config", "{stage_config}",
                     "--output", "{output}",
                 ],
                 "minimum_score": -0.5,

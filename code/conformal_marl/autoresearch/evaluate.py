@@ -26,7 +26,11 @@ def evaluate_candidate(
     if tier == "operator":
         return run_operator_benchmark(estimate_operator, seed=seed, trials=trials)
     if tier == "mechanism":
-        config = MechanismSweepConfig.from_dict(mechanism_config or {"trials": trials})
+        # The experiment designer may choose bounded sweep axes, but never the trial
+        # count supplied by the frozen evaluator command.
+        payload = dict(mechanism_config or {})
+        payload["trials"] = trials
+        config = MechanismSweepConfig.from_dict(payload)
         return run_mechanism_benchmark(estimate_operator, seed=seed, config=config)
     if tier == "learning":
         return run_learning_benchmark(
