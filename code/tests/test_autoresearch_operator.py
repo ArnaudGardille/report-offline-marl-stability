@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from conformal_marl.autoresearch.api import Estimate, OperatorBatch
-from conformal_marl.autoresearch.candidate import estimate_operator
+from conformal_marl.autoresearch.candidate import estimate_operator, sample_replay  # noqa: F401
 from conformal_marl.autoresearch.frozen.operator_benchmark import (
     DEFAULT_SCENARIOS,
     OperatorScenario,

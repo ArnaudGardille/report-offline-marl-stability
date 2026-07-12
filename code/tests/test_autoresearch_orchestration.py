@@ -22,7 +22,6 @@ def _init_fixture(tmp_path: Path) -> tuple[Path, Path, Path]:
     for path in (
         "code/conformal_marl/autoresearch/api.py",
         "code/conformal_marl/autoresearch/evaluate.py",
-        "code/conformal_marl/autoresearch/candidate.py",
         "code/conformal_marl/iql.py",
         "code/conformal_marl/replay.py",
         "code/conformal_marl/samplers.py",
@@ -34,6 +33,9 @@ def _init_fixture(tmp_path: Path) -> tuple[Path, Path, Path]:
         target = repo / path
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text("")
+    candidate = repo / "code/conformal_marl/autoresearch/candidate"
+    candidate.mkdir()
+    (candidate / "__init__.py").write_text("")
     (repo / "code/conformal_marl/envs").mkdir()
     subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
     subprocess.run(["git", "add", "."], cwd=repo, check=True)
@@ -61,9 +63,11 @@ def test_build_search_config_uses_absolute_paths_and_staged_gate(tmp_path: Path)
     )
     assert Path(config["repository"]).is_absolute()
     assert Path(config["task_context_file"]).is_absolute()
-    assert [stage["name"] for stage in config["stages"]] == ["operator", "learning"]
+    assert [stage["name"] for stage in config["stages"]] == [
+        "operator", "mechanism", "learning"
+    ]
     assert config["stages"][0]["minimum_score"] == pytest.approx(-0.25)
-    learning_command = config["stages"][1]["command"]
+    learning_command = config["stages"][2]["command"]
     seed_option = learning_command.index("--num-seeds")
     assert learning_command[seed_option + 1] == "3"
 

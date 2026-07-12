@@ -13,10 +13,13 @@ is stationary; only the teammate action distribution changes.
 
 ## Editable contract
 
-You may replace only `candidate.py`. Preserve both public entry points:
+You may replace files only inside `candidate/`. Preserve both public entry points exported
+from `candidate/__init__.py`:
 
 - `estimate_operator(batch, rng) -> Estimate`
 - the sampler registered as `autoresearch_candidate`
+
+Use `estimator.py`, `sampler.py`, `target_policy.py`, and `state.py` to separate concerns.
 
 The implementation must remain generic, finite, JAX-compatible in the learning tier,
 and must not inspect environment names, evaluation seeds, or evaluator internals.

@@ -3,7 +3,7 @@
 This package separates the one file an automated researcher may edit from the benchmark
 that decides whether the edit helped.
 
-- `candidate.py` is editable.
+- `candidate/` is the only editable package.
 - `api.py` defines the candidate contract.
 - `frozen/` generates private data and computes objective metrics; it is read-only during
   an automated search.
