@@ -36,7 +36,10 @@ def main() -> None:
     write_search_config(config, args.output)
     launcher = args.orchestrator.resolve() / "launch_constrained_bfts.py"
     print(f"Wrote {args.output.resolve()}")
-    print(f"Launch with: python3 {launcher} --config {args.output.resolve()} --model gpt-4.1")
+    print(
+        f"Launch with: python3 {launcher} --config {args.output.resolve()} "
+        "--model claude-code/sonnet"
+    )
 
 
 if __name__ == "__main__":
