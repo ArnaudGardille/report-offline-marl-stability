@@ -39,8 +39,11 @@ def build_search_config(
     base_ref: str,
     output_dir: Path,
     task_context_file: Path,
+    shared_python: Path,
     max_nodes: int = 12,
-    branching_factor: int = 3,
+    initial_capacity: int = 5,
+    revisions_per_expansion: int = 2,
+    max_per_family: int = 2,
     operator_trials: int = 128,
     learning_seeds: int = 8,
 ) -> dict:
@@ -49,8 +52,9 @@ def build_search_config(
     repository = repository.resolve()
     orchestrator = orchestrator.resolve()
     task_context_file = task_context_file.resolve()
+    shared_python = shared_python.resolve()
     candidate = repository / "code/conformal_marl/autoresearch/candidate"
-    launcher = orchestrator / "launch_constrained_bfts.py"
+    launcher = orchestrator / "launch_hierarchical_campaign.py"
 
     if not (repository / ".git").exists() and not _git_ref_exists(repository, "HEAD"):
         raise ValueError(f"not a Git repository: {repository}")
@@ -62,7 +66,17 @@ def build_search_config(
         raise ValueError(f"constrained AI Scientist launcher is missing: {launcher}")
     if not task_context_file.is_file():
         raise ValueError(f"task context is missing: {task_context_file}")
-    if max_nodes < 2 or branching_factor < 1 or operator_trials < 2 or learning_seeds < 2:
+    if not shared_python.is_file():
+        raise ValueError(f"shared Python interpreter is missing: {shared_python}")
+    if (
+        max_nodes < 2
+        or initial_capacity < 1
+        or initial_capacity > max_nodes
+        or revisions_per_expansion < 1
+        or max_per_family < 1
+        or operator_trials < 2
+        or learning_seeds < 2
+    ):
         raise ValueError("invalid search or evaluation budget")
 
     missing_frozen = [path for path in FROZEN_PATHS if not (repository / path).exists()]
@@ -74,12 +88,13 @@ def build_search_config(
         "base_ref": base_ref,
         "candidate_path": "code/conformal_marl/autoresearch/candidate",
         "working_subdir": "code",
+        "shared_python": str(shared_python),
         "frozen_paths": list(FROZEN_PATHS),
         "stages": [
             {
                 "name": "operator",
                 "command": [
-                    "uv", "run", "python", "-m",
+                    "{python}", "-m",
                     "conformal_marl.autoresearch.evaluate",
                     "--tier", "operator", "--trials", str(operator_trials),
                     "--output", "{output}",
@@ -90,7 +105,7 @@ def build_search_config(
             {
                 "name": "mechanism",
                 "command": [
-                    "uv", "run", "python", "-m",
+                    "{python}", "-m",
                     "conformal_marl.autoresearch.evaluate",
                     "--tier", "mechanism", "--trials", "32",
                     "--output", "{output}",
@@ -101,7 +116,7 @@ def build_search_config(
             {
                 "name": "learning",
                 "command": [
-                    "uv", "run", "python", "-m",
+                    "{python}", "-m",
                     "conformal_marl.autoresearch.evaluate",
                     "--tier", "learning", "--num-seeds", str(learning_seeds),
                     "--output", "{output}",
@@ -111,9 +126,15 @@ def build_search_config(
         ],
         "task_context_file": str(task_context_file),
         "output_dir": str(output_dir.resolve()),
-        "branching_factor": branching_factor,
-        "max_nodes": max_nodes,
+        "campaign": {
+            "initial_capacity": initial_capacity,
+            "max_nodes": max_nodes,
+            "revisions_per_expansion": revisions_per_expansion,
+            "max_per_family": max_per_family,
+            "min_conceptual_distance": 0.2,
+        },
         "timeout_seconds": 3_600,
+        "model_timeout_seconds": 900,
     }
 
 
