@@ -63,6 +63,9 @@ def test_build_search_config_uses_absolute_paths_and_staged_gate(tmp_path: Path)
         max_nodes=4,
         initial_capacity=2,
         learning_seeds=3,
+        validation_trials=16,
+        validation_seeds=4,
+        finalist_count=2,
     )
     assert Path(config["repository"]).is_absolute()
     assert Path(config["task_context_file"]).is_absolute()
@@ -76,6 +79,14 @@ def test_build_search_config_uses_absolute_paths_and_staged_gate(tmp_path: Path)
     assert learning_command[seed_option + 1] == "3"
     assert config["campaign"]["initial_capacity"] == 2
     assert config["campaign"]["max_nodes"] == 4
+    assert config["campaign"]["finalist_count"] == 2
+    assert [stage["name"] for stage in config["final_stages"]] == [
+        "heldout_mechanism", "heldout_learning"
+    ]
+    heldout_command = config["final_stages"][1]["command"]
+    heldout_seed_option = heldout_command.index("--num-seeds")
+    assert heldout_command[heldout_seed_option + 1] == "4"
+    assert len(config["research_lenses"]) == 5
 
 
 def test_build_search_config_rejects_unknown_ref(tmp_path: Path):

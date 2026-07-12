@@ -21,6 +21,9 @@ def main() -> None:
     parser.add_argument("--max-per-family", type=int, default=2)
     parser.add_argument("--operator-trials", type=int, default=128)
     parser.add_argument("--learning-seeds", type=int, default=8)
+    parser.add_argument("--validation-trials", type=int, default=128)
+    parser.add_argument("--validation-seeds", type=int, default=32)
+    parser.add_argument("--finalist-count", type=int, default=2)
     args = parser.parse_args()
 
     repository = Path(__file__).resolve().parents[2]
@@ -38,6 +41,9 @@ def main() -> None:
         max_per_family=args.max_per_family,
         operator_trials=args.operator_trials,
         learning_seeds=args.learning_seeds,
+        validation_trials=args.validation_trials,
+        validation_seeds=args.validation_seeds,
+        finalist_count=args.finalist_count,
     )
     write_search_config(config, args.output)
     launcher = args.orchestrator.resolve() / "launch_hierarchical_campaign.py"
