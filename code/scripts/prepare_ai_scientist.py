@@ -11,7 +11,7 @@ from conformal_marl.autoresearch.orchestration import build_search_config, write
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--orchestrator", type=Path, required=True)
-    parser.add_argument("--base-ref", default="research-ai-scientist-integration")
+    parser.add_argument("--base-ref", default="main")
     parser.add_argument("--output", type=Path, default=Path("outputs/ai_scientist/config.json"))
     parser.add_argument("--results", type=Path, default=Path("outputs/ai_scientist/search"))
     parser.add_argument("--max-nodes", type=int, default=12)
