@@ -65,3 +65,9 @@ The search sees 8 paired seeds by default. After BFTS stops, only two unique fin
 are rerun on a distinct master seed with a 128-trial mechanism sweep and 32 paired
 learning seeds. Held-out JSON is stored separately and is never returned to the method
 designer, so final validation cannot become another tuning set.
+
+The experimentalist may configure the search-only mechanism sweep within validated
+bounds (actions, sample sizes, drift strengths, noise, coverage, and scenario seed). The
+evaluator fixes the repetition count and rejects unknown fields or sweeps above 128
+cells. Held-out mechanism validation ignores this design and uses the frozen default
+sweep.

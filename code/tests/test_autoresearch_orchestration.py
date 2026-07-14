@@ -76,6 +76,7 @@ def test_build_search_config_uses_absolute_paths_and_staged_gate(tmp_path: Path)
         "operator", "mechanism", "learning"
     ]
     assert config["stages"][0]["minimum_score"] == pytest.approx(-0.25)
+    assert "{stage_config}" in config["stages"][1]["command"]
     learning_command = config["stages"][2]["command"]
     seed_option = learning_command.index("--num-seeds")
     assert learning_command[seed_option + 1] == "3"

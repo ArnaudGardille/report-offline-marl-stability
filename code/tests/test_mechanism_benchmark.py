@@ -7,6 +7,7 @@ import pytest
 
 from conformal_marl.autoresearch.api import Estimate, OperatorBatch
 from conformal_marl.autoresearch.candidate import estimate_operator
+from conformal_marl.autoresearch.evaluate import evaluate_candidate
 from conformal_marl.autoresearch.frozen.mechanism_benchmark import (
     MechanismSweepConfig,
     generate_scenarios,
@@ -63,3 +64,23 @@ def test_config_rejects_unknown_fields_and_excessive_sweep():
             shift_strengths=(0.0, 0.5, 1.0),
             noise_levels=(0.0, 1.0),
         ).validate()
+
+
+def test_cli_trial_budget_overrides_agent_mechanism_config():
+    result = evaluate_candidate(
+        tier="mechanism",
+        seed=5,
+        trials=7,
+        mechanism_config={
+            "action_counts": [2],
+            "sample_sizes": [64],
+            "shift_strengths": [0.9],
+            "noise_levels": [0.1],
+            "coverage_floor": 0.02,
+            "scenario_seed": 9,
+            "trials": 4,
+        },
+    )
+    assert result["num_cells"] == 1
+    only_scenario = next(iter(result["scenarios"].values()))
+    assert only_scenario["trials"] == 7
