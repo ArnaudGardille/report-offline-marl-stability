@@ -147,10 +147,17 @@ def run_learning_benchmark(
         paired_delta = 0.6 * (candidate_auc - baseline_auc) + 0.4 * final_delta
         mean_delta = float(paired_delta.mean())
         lower_bound = mean_delta - confidence_z * _sem(paired_delta)
-        lower_bounds.append(lower_bound)
 
-        if scenario.support_gate and lower_bound < -support_tolerance:
-            gate_failures.append(scenario.name)
+        if scenario.support_gate:
+            # Simultaneous-Attack is a support-preservation gate, not a scored
+            # objective. It may only *cap* the score on a support regression; a
+            # candidate must never be able to lift primary_score by improving the
+            # gate scenario (support-starvation theorem: that trade is null-to-
+            # negative and the search must not be steered toward it).
+            if lower_bound < -support_tolerance:
+                gate_failures.append(scenario.name)
+        else:
+            lower_bounds.append(lower_bound)
 
         results[scenario.name] = {
             "support_gate": scenario.support_gate,
@@ -164,6 +171,8 @@ def run_learning_benchmark(
             "candidate_auc": candidate_auc.tolist(),
         }
 
+    if not lower_bounds:
+        raise ValueError("at least one non-gate (scored) scenario is required")
     raw_score = float(np.mean(lower_bounds))
     primary_score = raw_score if not gate_failures else min(raw_score, -support_tolerance)
     return {
