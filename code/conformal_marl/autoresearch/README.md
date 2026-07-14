@@ -41,3 +41,19 @@ uv run python -m conformal_marl.autoresearch.evaluate \
 Its score is a lower confidence bound on paired AUC/final-return improvement over
 uniform replay. Simultaneous-Attack is a support-preservation gate, not a target to game:
 a candidate with a material regression there is rejected even if it improves STORM.
+
+## AI Scientist v2 orchestration
+
+Keep the orchestrator in a sibling checkout; do not vendor it into this repository. After
+checking out the constrained-BFTS adaptation, generate a machine-local config:
+
+```bash
+uv run python scripts/prepare_ai_scientist.py \
+  --orchestrator /path/to/AI-Scientist-v2 \
+  --base-ref research-ai-scientist-integration
+```
+
+The command validates the Git ref and every frozen path, then prints the exact launch
+command. Search outputs remain under ignored `code/outputs/`; only reviewed candidate
+code and reproducible aggregate figures belong in the paper repository. Run generated
+code in a sandbox, and disclose AI Scientist use in any resulting manuscript.
