@@ -8,12 +8,26 @@ from pathlib import Path
 
 from conformal_marl.autoresearch.candidate import estimate_operator, sample_replay  # noqa: F401
 from conformal_marl.autoresearch.frozen.learning_benchmark import run_learning_benchmark
+from conformal_marl.autoresearch.frozen.mechanism_benchmark import (
+    MechanismSweepConfig,
+    run_mechanism_benchmark,
+)
 from conformal_marl.autoresearch.frozen.operator_benchmark import run_operator_benchmark
 
 
-def evaluate_candidate(*, tier: str, seed: int, trials: int, num_seeds: int = 8) -> dict:
+def evaluate_candidate(
+    *,
+    tier: str,
+    seed: int,
+    trials: int,
+    num_seeds: int = 8,
+    mechanism_config: dict | None = None,
+) -> dict:
     if tier == "operator":
         return run_operator_benchmark(estimate_operator, seed=seed, trials=trials)
+    if tier == "mechanism":
+        config = MechanismSweepConfig.from_dict(mechanism_config or {"trials": trials})
+        return run_mechanism_benchmark(estimate_operator, seed=seed, config=config)
     if tier == "learning":
         return run_learning_benchmark(
             "autoresearch_candidate", seed=seed, num_seeds=num_seeds
@@ -23,15 +37,27 @@ def evaluate_candidate(*, tier: str, seed: int, trials: int, num_seeds: int = 8)
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Evaluate one constrained replay candidate")
-    parser.add_argument("--tier", choices=("operator", "learning"), default="operator")
+    parser.add_argument(
+        "--tier", choices=("operator", "mechanism", "learning"), default="operator"
+    )
     parser.add_argument("--seed", type=int, default=20260712)
     parser.add_argument("--trials", type=int, default=128)
     parser.add_argument("--num-seeds", type=int, default=8)
+    parser.add_argument("--mechanism-config", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
 
+    mechanism_config = (
+        json.loads(args.mechanism_config.read_text(encoding="utf-8"))
+        if args.mechanism_config
+        else None
+    )
     result = evaluate_candidate(
-        tier=args.tier, seed=args.seed, trials=args.trials, num_seeds=args.num_seeds
+        tier=args.tier,
+        seed=args.seed,
+        trials=args.trials,
+        num_seeds=args.num_seeds,
+        mechanism_config=mechanism_config,
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, indent=2, sort_keys=True), encoding="utf-8")

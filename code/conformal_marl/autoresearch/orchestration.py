@@ -49,14 +49,14 @@ def build_search_config(
     repository = repository.resolve()
     orchestrator = orchestrator.resolve()
     task_context_file = task_context_file.resolve()
-    candidate = repository / "code/conformal_marl/autoresearch/candidate.py"
+    candidate = repository / "code/conformal_marl/autoresearch/candidate"
     launcher = orchestrator / "launch_constrained_bfts.py"
 
     if not (repository / ".git").exists() and not _git_ref_exists(repository, "HEAD"):
         raise ValueError(f"not a Git repository: {repository}")
     if not _git_ref_exists(repository, base_ref):
         raise ValueError(f"Git ref {base_ref!r} does not exist in {repository}")
-    if not candidate.is_file():
+    if not candidate.is_dir():
         raise ValueError(f"candidate contract is missing: {candidate}")
     if not launcher.is_file():
         raise ValueError(f"constrained AI Scientist launcher is missing: {launcher}")
@@ -72,7 +72,7 @@ def build_search_config(
     return {
         "repository": str(repository),
         "base_ref": base_ref,
-        "candidate_path": "code/conformal_marl/autoresearch/candidate.py",
+        "candidate_path": "code/conformal_marl/autoresearch/candidate",
         "working_subdir": "code",
         "frozen_paths": list(FROZEN_PATHS),
         "stages": [
@@ -85,6 +85,17 @@ def build_search_config(
                     "--output", "{output}",
                 ],
                 "minimum_score": -0.25,
+                "required_status": "ok",
+            },
+            {
+                "name": "mechanism",
+                "command": [
+                    "uv", "run", "python", "-m",
+                    "conformal_marl.autoresearch.evaluate",
+                    "--tier", "mechanism", "--trials", "32",
+                    "--output", "{output}",
+                ],
+                "minimum_score": -0.5,
                 "required_status": "ok",
             },
             {
