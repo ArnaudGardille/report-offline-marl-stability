@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -46,13 +47,18 @@ def build_search_config(
     max_per_family: int = 2,
     operator_trials: int = 128,
     learning_seeds: int = 8,
+    validation_trials: int = 128,
+    validation_seeds: int = 32,
+    finalist_count: int = 2,
 ) -> dict:
     """Build a portable constrained-search config after strict local preflight."""
 
     repository = repository.resolve()
     orchestrator = orchestrator.resolve()
     task_context_file = task_context_file.resolve()
-    shared_python = shared_python.resolve()
+    # Preserve the virtualenv executable path. Resolving its symlink points at uv's
+    # bare CPython installation, which no longer discovers the venv site-packages.
+    shared_python = Path(os.path.abspath(shared_python))
     candidate = repository / "code/conformal_marl/autoresearch/candidate"
     launcher = orchestrator / "launch_hierarchical_campaign.py"
 
@@ -76,6 +82,9 @@ def build_search_config(
         or max_per_family < 1
         or operator_trials < 2
         or learning_seeds < 2
+        or validation_trials < 4
+        or validation_seeds < 4
+        or finalist_count < 1
     ):
         raise ValueError("invalid search or evaluation budget")
 
@@ -124,6 +133,49 @@ def build_search_config(
                 "required_status": "ok",
             },
         ],
+        "final_stages": [
+            {
+                "name": "heldout_mechanism",
+                "command": [
+                    "{python}", "-m", "conformal_marl.autoresearch.evaluate",
+                    "--tier", "mechanism", "--seed", "20260713",
+                    "--trials", str(validation_trials), "--output", "{output}",
+                ],
+                "minimum_score": -0.5,
+                "required_status": "ok",
+            },
+            {
+                "name": "heldout_learning",
+                "command": [
+                    "{python}", "-m", "conformal_marl.autoresearch.evaluate",
+                    "--tier", "learning", "--seed", "20260713",
+                    "--num-seeds", str(validation_seeds), "--output", "{output}",
+                ],
+                "required_status": "ok",
+            },
+        ],
+        "research_lenses": [
+            {
+                "name": "statistical-estimation",
+                "instruction": "Derive an estimator from the conditional bias and variance structure.",
+            },
+            {
+                "name": "counterfactual-causal",
+                "instruction": "Exploit stationary dynamics conditional on observed joint actions.",
+            },
+            {
+                "name": "game-theoretic",
+                "instruction": "Address teammate adaptation and cooperative equilibrium selection.",
+            },
+            {
+                "name": "coverage-exploration",
+                "instruction": "Improve information coverage without starving rare useful support.",
+            },
+            {
+                "name": "robust-control",
+                "instruction": "Optimize against bounded teammate-policy drift and misspecification.",
+            },
+        ],
         "task_context_file": str(task_context_file),
         "output_dir": str(output_dir.resolve()),
         "campaign": {
@@ -132,6 +184,7 @@ def build_search_config(
             "revisions_per_expansion": revisions_per_expansion,
             "max_per_family": max_per_family,
             "min_conceptual_distance": 0.2,
+            "finalist_count": finalist_count,
         },
         "timeout_seconds": 3_600,
         "model_timeout_seconds": 900,
