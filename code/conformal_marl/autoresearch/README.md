@@ -50,7 +50,7 @@ checking out the constrained-BFTS adaptation, generate a machine-local config:
 ```bash
 uv run python scripts/prepare_ai_scientist.py \
   --orchestrator /path/to/AI-Scientist-v2 \
-  --base-ref research-ai-scientist-integration
+  --base-ref main
 ```
 
 The command validates the Git ref, candidate package, shared `uv` interpreter, and every
