@@ -53,7 +53,10 @@ uv run python scripts/prepare_ai_scientist.py \
   --base-ref research-ai-scientist-integration
 ```
 
-The command validates the Git ref and every frozen path, then prints the exact launch
-command. Search outputs remain under ignored `code/outputs/`; only reviewed candidate
-code and reproducible aggregate figures belong in the paper repository. Run generated
-code in a sandbox, and disclose AI Scientist use in any resulting manuscript.
+The command validates the Git ref, candidate package, shared `uv` interpreter, and every
+frozen path, then prints the exact hierarchical-campaign command. Each worktree imports
+its own candidate through `PYTHONPATH` while reusing the prepared dependency environment,
+which avoids reinstalling JAX for every node. Search outputs remain under ignored
+`code/outputs/`; only reviewed candidate code and reproducible aggregate figures belong
+in the paper repository. Run generated code in an OS-level sandbox, and disclose AI
+Scientist use in any resulting manuscript.

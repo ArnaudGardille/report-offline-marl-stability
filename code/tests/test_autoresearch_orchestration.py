@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -17,7 +18,7 @@ def _init_fixture(tmp_path: Path) -> tuple[Path, Path, Path]:
     repo.mkdir()
     orchestrator.mkdir()
     context.write_text("task")
-    (orchestrator / "launch_constrained_bfts.py").write_text("")
+    (orchestrator / "launch_hierarchical_campaign.py").write_text("")
     (repo / "code/conformal_marl/autoresearch/frozen").mkdir(parents=True)
     for path in (
         "code/conformal_marl/autoresearch/api.py",
@@ -58,11 +59,14 @@ def test_build_search_config_uses_absolute_paths_and_staged_gate(tmp_path: Path)
         base_ref="HEAD",
         output_dir=tmp_path / "results",
         task_context_file=context,
+        shared_python=Path(sys.executable),
         max_nodes=4,
+        initial_capacity=2,
         learning_seeds=3,
     )
     assert Path(config["repository"]).is_absolute()
     assert Path(config["task_context_file"]).is_absolute()
+    assert Path(config["shared_python"]).is_absolute()
     assert [stage["name"] for stage in config["stages"]] == [
         "operator", "mechanism", "learning"
     ]
@@ -70,6 +74,8 @@ def test_build_search_config_uses_absolute_paths_and_staged_gate(tmp_path: Path)
     learning_command = config["stages"][2]["command"]
     seed_option = learning_command.index("--num-seeds")
     assert learning_command[seed_option + 1] == "3"
+    assert config["campaign"]["initial_capacity"] == 2
+    assert config["campaign"]["max_nodes"] == 4
 
 
 def test_build_search_config_rejects_unknown_ref(tmp_path: Path):
@@ -81,4 +87,5 @@ def test_build_search_config_rejects_unknown_ref(tmp_path: Path):
             base_ref="missing-branch",
             output_dir=tmp_path / "results",
             task_context_file=context,
+            shared_python=Path(sys.executable),
         )
