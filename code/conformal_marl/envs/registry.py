@@ -47,12 +47,12 @@ of scope**: IQL is discrete; those need MADDPG, deferred):
 
 Known-incompatible (instantiable, but **not** runnable by the per-agent IQL loop):
 
-* ``storm`` / ``storm_2p`` -- the in-the-Matrix games return obs as a *single* dict
-  ``{"inventory", "observations"}`` keyed by field, NOT per-agent (``obs[agent]``),
-  and their reward is not a per-agent dict. The IQL loop's per-agent
-  ``obs[a] / rewards[a]`` contract does not hold, so STORM needs a bespoke adapter
-  that is out of M7's scope. :func:`make_env` raises a clear ``NotImplementedError``
-  pointing here, rather than failing deep inside ``make_train``.
+* ``storm`` / ``storm_2p`` -- the in-the-Matrix games expose tuple-valued agent data
+  and structured observations. :class:`StormAdapter` maps that API to the per-agent
+  dictionaries consumed by IQL and flattens each agent's view and inventory. The
+  factory uses a symmetric common-payoff matrix by default, making this entry a
+  cooperative coordination benchmark rather than the library's general-sum Prisoner's
+  Dilemma.
 
 Two thin wrappers live here (moved out of the scripts):
 
@@ -252,6 +252,72 @@ class HanabiWrapper(AvailActionsWrapper):
         return self._env.step_env(key, state, self._reshape(actions))
 
 
+class StormAdapter(MultiAgentEnv):
+    """Adapt JaxMARL STORM's tuple API to the shared per-agent IQL contract.
+
+    JaxMARL 0.0.2 represents each observation as ``(view, inventory)`` inside a
+    tuple indexed by integer agent id. Actions and rewards are tuples too, while the
+    done mapping contains only ``"__all__"``. The project's IQL loop expects flat
+    float observations and per-agent dictionaries for all of these values. This
+    adapter performs exactly those structural conversions and delegates dynamics to
+    the original environment.
+    """
+
+    def __init__(self, env: MultiAgentEnv) -> None:
+        self._env = env
+        # String keys can coexist with JaxMARL's ``"__all__"`` done key in a JAX
+        # pytree. Raw STORM uses integer ids, whose mixture with a string key cannot
+        # be sorted by tree flattening during the jitted auto-reset path.
+        self.agents = [f"agent_{i}" for i in range(env.num_agents)]
+        self.num_agents = env.num_agents
+        raw_obs, _ = env.reset(jax.random.PRNGKey(0))
+        flat_dim = int(
+            np.prod(raw_obs[0]["observation"].shape)
+            + np.prod(raw_obs[0]["inventory"].shape)
+        )
+        self._obs_space = Box(-1e9, 1e9, (flat_dim,), dtype=jnp.float32)
+
+    def _observations(self, observations: tuple) -> dict:
+        return {
+            agent: jnp.concatenate(
+                [
+                    observations[i]["observation"].reshape(-1),
+                    observations[i]["inventory"].reshape(-1),
+                ]
+            ).astype(jnp.float32)
+            for i, agent in enumerate(self.agents)
+        }
+
+    def reset(self, key):
+        observations, state = self._env.reset(key)
+        return self._observations(observations), state
+
+    def step_env(self, key, state, actions):
+        action_tuple = tuple(actions[agent] for agent in self.agents)
+        observations, state, rewards, dones, info = self._env.step_env(
+            key, state, action_tuple
+        )
+        done = dones["__all__"]
+        reward_dict = {agent: rewards[i] for i, agent in enumerate(self.agents)}
+        done_dict = {agent: done for agent in self.agents}
+        done_dict["__all__"] = done
+        return self._observations(observations), state, reward_dict, done_dict, info
+
+    def observation_space(self, agent: int = 0):
+        del agent
+        return self._obs_space
+
+    def action_space(self, agent: int = 0):
+        del agent
+        return self._env.action_space()
+
+    def get_obs(self, state):
+        return self._observations(self._env.get_obs(state))
+
+    def __getattr__(self, name):
+        return getattr(self.__dict__["_env"], name)
+
+
 # --------------------------------------------------------------------------- spec
 @dataclass
 class EnvSpec:
@@ -343,13 +409,14 @@ def _build_switch_riddle(**kwargs: Any) -> MultiAgentEnv:
     return jaxmarl.make("switch_riddle", **kwargs)
 
 
-def _build_storm(*_: Any, **__: Any) -> MultiAgentEnv:
-    raise NotImplementedError(
-        "STORM ('storm'/'storm_2p') returns obs as a single {'inventory','observations'} "
-        "dict (not per-agent obs[agent]) and a non-per-agent reward, so the per-agent IQL "
-        "loop cannot consume it without a bespoke adapter (out of M7 scope). See "
-        "conformal_marl/envs/registry.py."
-    )
+def _build_storm(**kwargs: Any) -> MultiAgentEnv:
+    # Symmetric common-payoff coordination game: mutual cooperation is optimal,
+    # unilateral cooperation is costly, and mutual defection is a lower equilibrium.
+    # JaxMARL expects one 2x2 matrix per player.
+    common_payoff = jnp.asarray([[4, 0], [0, 2]], dtype=jnp.int32)
+    payoff_matrix = kwargs.pop("payoff_matrix", jnp.stack([common_payoff, common_payoff]))
+    base = jaxmarl.make("storm_2p", payoff_matrix=payoff_matrix, **kwargs)
+    return StormAdapter(base)
 
 
 # name -> (builder, partially_observable). ``masks_actions`` / ``obs_dim`` are derived
@@ -372,16 +439,16 @@ _BUILDERS: dict[str, tuple[Callable[..., MultiAgentEnv], bool]] = {
     "overcooked": (_build_overcooked, True),
     "hanabi": (_build_hanabi, True),
     "switch_riddle": (_build_switch_riddle, True),
+    "storm": (_build_storm, True),
+    "storm_2p": (_build_storm, True),
     # Known-incompatible with the per-agent IQL loop (instantiable only -> raise a clear
     # NotImplementedError pointing at the reason; never fail deep inside make_train).
     "coin_game": (_build_coin_game, True),
-    "storm": (_build_storm, True),
-    "storm_2p": (_build_storm, True),
 }
 
 # Names whose builders raise NotImplementedError (non-per-agent obs/reward APIs): the IQL
 # loop cannot consume them without a bespoke adapter, deferred from M7.
-INCOMPATIBLE_ENVS: tuple[str, ...] = ("coin_game", "storm", "storm_2p")
+INCOMPATIBLE_ENVS: tuple[str, ...] = ("coin_game",)
 
 # Convenience: the subset the IQL loop can actually instantiate *and run*.
 IN_SCOPE_ENVS: tuple[str, ...] = tuple(
@@ -429,6 +496,13 @@ def _default_config(spec_name: str, partially_observable: bool, num_actions: int
             buffer_size=50_000, target_update_interval=100, epsilon_anneal_time=30_000,
             eval_episodes=64, eval_steps=12, net_type=net_type,
         )
+    if spec_name in {"storm", "storm_2p"}:
+        return IQLConfig(
+            total_timesteps=250_000, num_envs=16, num_steps=32, num_grad_steps=8,
+            learning_starts=512, hidden_dim=64, lr=5e-4, gamma=0.99, batch_size=128,
+            buffer_size=100_000, target_update_interval=100, epsilon_anneal_time=150_000,
+            eval_episodes=16, eval_steps=160, net_type=net_type,
+        )
     if "SMAX" in spec_name:
         return IQLConfig(
             total_timesteps=2_000_000, num_envs=16, num_steps=64, num_grad_steps=8,
@@ -454,8 +528,7 @@ def make_env(name: str, config_overrides: dict | None = None, **env_kwargs: Any)
         A factory key (see :func:`available_envs`): the custom ``"simu"``, an MPE id
         (``"MPE_simple_spread_v3"``), ``"SMAX"`` / ``"HeuristicEnemySMAX"`` /
         ``"LearnedPolicyEnemySMAX"``, ``"overcooked"``, ``"coin_game"``, ``"hanabi"``,
-        or ``"switch_riddle"``. (``"storm"`` / ``"storm_2p"`` raise -- see the module
-        docstring.)
+        ``"switch_riddle"``, or the adapted cooperative ``"storm"`` / ``"storm_2p"``.
     config_overrides:
         Optional mapping of :class:`IQLConfig` field -> value, applied to the env's
         default config (e.g. ``{"total_timesteps": 1000, "num_envs": 2}`` to make a CI
