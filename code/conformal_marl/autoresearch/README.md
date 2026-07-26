@@ -61,10 +61,12 @@ which avoids reinstalling JAX for every node. Search outputs remain under ignore
 in the paper repository. Run generated code in an OS-level sandbox, and disclose AI
 Scientist use in any resulting manuscript.
 
-The search sees 8 paired seeds by default. After BFTS stops, only two unique finalists
-are rerun on a distinct master seed with a 128-trial mechanism sweep and 32 paired
-learning seeds. Held-out JSON is stored separately and is never returned to the method
-designer, so final validation cannot become another tuning set.
+The search sees 8 paired seeds by default. After BFTS stops, the highest-ranked unique
+candidate is frozen and rerun on a distinct master seed with a 128-trial mechanism sweep
+and 32 paired learning seeds. The held-out result is confirmatory: it cannot select a
+runner-up, is stored separately, and is never returned to the method designer. A failed
+held-out evaluation therefore rejects the selected candidate instead of turning the final
+benchmark into another tuning set.
 
 The experimentalist may configure the search-only mechanism sweep within validated
 bounds (actions, sample sizes, drift strengths, noise, coverage, and scenario seed). The

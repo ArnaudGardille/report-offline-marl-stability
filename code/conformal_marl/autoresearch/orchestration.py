@@ -49,7 +49,7 @@ def build_search_config(
     learning_seeds: int = 8,
     validation_trials: int = 128,
     validation_seeds: int = 32,
-    finalist_count: int = 2,
+    finalist_count: int = 1,
 ) -> dict:
     """Build a portable constrained-search config after strict local preflight."""
 
@@ -84,7 +84,7 @@ def build_search_config(
         or learning_seeds < 2
         or validation_trials < 4
         or validation_seeds < 4
-        or finalist_count < 1
+        or finalist_count != 1
     ):
         raise ValueError("invalid search or evaluation budget")
 
