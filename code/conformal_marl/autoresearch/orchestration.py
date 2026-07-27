@@ -158,6 +158,7 @@ def build_search_config(
                 "command": [
                     "{python}", "-m", "conformal_marl.autoresearch.evaluate",
                     "--tier", "mechanism", "--seed", "20260713",
+                    "--mechanism-profile", "heldout",
                     "--trials", str(validation_trials), "--output", "{output}",
                 ],
                 "minimum_score": -0.5,
@@ -168,6 +169,7 @@ def build_search_config(
                 "command": [
                     "{python}", "-m", "conformal_marl.autoresearch.evaluate",
                     "--tier", "learning", "--seed", "20260713",
+                    "--learning-profile", "heldout",
                     "--num-seeds", str(validation_seeds), "--output", "{output}",
                 ],
                 "minimum_score": 0.001,

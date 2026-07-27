@@ -64,10 +64,12 @@ Scientist use in any resulting manuscript.
 
 The search sees 8 paired seeds by default. After BFTS stops, the highest-ranked unique
 candidate is frozen and rerun on a distinct master seed with a 128-trial mechanism sweep
-and 32 paired learning seeds. The held-out result is confirmatory: it cannot select a
-runner-up, is stored separately, and is never returned to the method designer. A failed
-held-out evaluation therefore rejects the selected candidate instead of turning the final
-benchmark into another tuning set.
+and 32 paired learning seeds. Held-out mechanism axes use unseen action counts, sample
+sizes, noise levels, drift strengths, and scenario seed. Held-out learning changes the
+Simultaneous-Attack agent count and the STORM horizon. The result is confirmatory: it
+cannot select a runner-up, is stored separately, and is never returned to the method
+designer. A failed held-out evaluation therefore rejects the selected candidate instead
+of turning the final benchmark into another tuning set.
 
 The experimentalist may configure a search-only diagnostic sweep within validated bounds
 (actions, sample sizes, drift strengths, noise, coverage, and scenario seed). This stage

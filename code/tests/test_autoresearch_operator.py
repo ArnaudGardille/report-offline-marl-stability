@@ -12,6 +12,10 @@ from conformal_marl.autoresearch.frozen.operator_benchmark import (
     OperatorScenario,
     run_operator_benchmark,
 )
+from conformal_marl.autoresearch.frozen.mechanism_benchmark import (
+    HELDOUT_MECHANISM_CONFIG,
+    MechanismSweepConfig,
+)
 
 
 def test_operator_batch_requires_full_behavior_support():
@@ -84,3 +88,11 @@ def test_scenario_rejects_zero_support_even_when_target_is_zero():
     )
     with pytest.raises(ValueError, match="support"):
         scenario.validate()
+
+
+def test_heldout_mechanism_profile_uses_unseen_axes_and_seed():
+    search = MechanismSweepConfig()
+    heldout = HELDOUT_MECHANISM_CONFIG
+    assert heldout.action_counts != search.action_counts
+    assert heldout.sample_sizes != search.sample_sizes
+    assert heldout.scenario_seed != search.scenario_seed

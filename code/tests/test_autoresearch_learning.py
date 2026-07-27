@@ -8,6 +8,8 @@ import pytest
 from conformal_marl.autoresearch.candidate import sample_replay  # noqa: F401
 from conformal_marl.autoresearch.frozen import learning_benchmark
 from conformal_marl.autoresearch.frozen.learning_benchmark import (
+    DEFAULT_LEARNING_SCENARIOS,
+    HELDOUT_LEARNING_SCENARIOS,
     LearningScenario,
     run_learning_benchmark,
 )
@@ -85,6 +87,15 @@ def test_all_gate_scenarios_are_rejected_as_unscored():
         run_learning_benchmark(
             "autoresearch_candidate", seed=0, num_seeds=2, scenarios=(TINY_GATE,)
         )
+
+
+def test_heldout_learning_profile_changes_agents_and_horizon():
+    search_gate, search_scored = DEFAULT_LEARNING_SCENARIOS
+    heldout_gate, heldout_scored = HELDOUT_LEARNING_SCENARIOS
+    assert heldout_gate.env_kwargs["num_agents"] != search_gate.env_kwargs["num_agents"]
+    assert heldout_scored.env_kwargs["num_inner_steps"] != search_scored.env_kwargs[
+        "num_inner_steps"
+    ]
 
 
 def test_support_gate_improvement_cannot_lift_the_score(monkeypatch):

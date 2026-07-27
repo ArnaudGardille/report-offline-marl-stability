@@ -101,6 +101,8 @@ def test_build_search_config_uses_absolute_paths_and_staged_gate(tmp_path: Path)
         "heldout_mechanism", "heldout_learning"
     ]
     heldout_command = config["final_stages"][1]["command"]
+    assert "heldout" in config["final_stages"][0]["command"]
+    assert "heldout" in heldout_command
     heldout_seed_option = heldout_command.index("--num-seeds")
     assert heldout_command[heldout_seed_option + 1] == "4"
     assert config["final_stages"][1]["minimum_score"] == pytest.approx(0.001)

@@ -82,6 +82,52 @@ DEFAULT_LEARNING_SCENARIOS = (
     ),
 )
 
+HELDOUT_LEARNING_SCENARIOS = (
+    LearningScenario(
+        name="simultaneous_attack_support_4_agents",
+        env_name="simu",
+        env_kwargs={"num_agents": 4},
+        config_overrides={
+            "total_timesteps": 8_192,
+            "num_envs": 8,
+            "num_steps": 8,
+            "num_grad_steps": 4,
+            "learning_starts": 128,
+            "hidden_dim": 32,
+            "batch_size": 64,
+            "buffer_size": 8_192,
+            "cal_size": 32,
+            "epsilon_anneal_time": 4_096,
+            "eval_episodes": 32,
+            "eval_steps": 2,
+            "eval_during_training": True,
+        },
+        return_scale=5.0,
+        support_gate=True,
+    ),
+    LearningScenario(
+        name="storm_cooperative_long_horizon",
+        env_name="storm",
+        env_kwargs={"num_inner_steps": 64},
+        config_overrides={
+            "total_timesteps": 20_480,
+            "num_envs": 8,
+            "num_steps": 32,
+            "num_grad_steps": 4,
+            "learning_starts": 256,
+            "hidden_dim": 64,
+            "batch_size": 64,
+            "buffer_size": 20_480,
+            "cal_size": 64,
+            "epsilon_anneal_time": 12_000,
+            "eval_episodes": 8,
+            "eval_steps": 64,
+            "eval_during_training": True,
+        },
+        return_scale=16.0,
+    ),
+)
+
 
 def _run_sampler(scenario: LearningScenario, sampler_name: str, seeds: np.ndarray) -> dict:
     overrides = dict(scenario.config_overrides)

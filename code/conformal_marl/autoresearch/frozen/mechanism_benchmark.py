@@ -67,6 +67,17 @@ class MechanismSweepConfig:
         return config
 
 
+HELDOUT_MECHANISM_CONFIG = MechanismSweepConfig(
+    action_counts=(3, 6, 12),
+    sample_sizes=(96, 384),
+    shift_strengths=(0.25, 0.75, 1.0),
+    noise_levels=(0.25, 1.25),
+    coverage_floor=0.01,
+    scenario_seed=20260713,
+    trials=128,
+)
+
+
 def _softmax(values: np.ndarray) -> np.ndarray:
     shifted = values - np.max(values)
     exponentiated = np.exp(shifted)
