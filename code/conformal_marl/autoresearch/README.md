@@ -68,8 +68,14 @@ runner-up, is stored separately, and is never returned to the method designer. A
 held-out evaluation therefore rejects the selected candidate instead of turning the final
 benchmark into another tuning set.
 
-The experimentalist may configure the search-only mechanism sweep within validated
-bounds (actions, sample sizes, drift strengths, noise, coverage, and scenario seed). The
-evaluator fixes the repetition count and rejects unknown fields or sweeps above 128
-cells. Held-out mechanism validation ignores this design and uses the frozen default
-sweep.
+The experimentalist may configure a search-only diagnostic sweep within validated bounds
+(actions, sample sizes, drift strengths, noise, coverage, and scenario seed). This stage
+is recorded but never contributes to cross-candidate ranking, because two candidates
+tested on different designs do not have comparable scores. Every candidate is ranked on
+the same frozen mechanism sweep after the diagnostic stage. The evaluator fixes
+repetition counts and rejects unknown fields or sweeps above 128 cells. Held-out
+mechanism validation ignores the designed diagnostic.
+
+Learning promotion requires a positive paired screening bound on the scored STORM task
+and no Simultaneous-Attack support regression. Merely completing training is not treated
+as evidence of improved sample efficiency.
