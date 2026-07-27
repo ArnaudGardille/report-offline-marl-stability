@@ -6,7 +6,6 @@ import argparse
 import json
 from pathlib import Path
 
-from conformal_marl.autoresearch.candidate import estimate_operator, sample_replay  # noqa: F401
 from conformal_marl.autoresearch.frozen.learning_benchmark import (
     HELDOUT_LEARNING_SCENARIOS,
     run_learning_benchmark,
@@ -17,6 +16,13 @@ from conformal_marl.autoresearch.frozen.mechanism_benchmark import (
     run_mechanism_benchmark,
 )
 from conformal_marl.autoresearch.frozen.operator_benchmark import run_operator_benchmark
+from conformal_marl.samplers import get_sampler, uniform_sampler
+
+# Bind the trusted scorer and baseline modules before candidate import-time code runs.
+from conformal_marl.autoresearch.candidate import estimate_operator, sample_replay  # noqa: E402,F401
+
+if get_sampler("uniform") is not uniform_sampler:
+    raise RuntimeError("candidate import changed the frozen uniform replay baseline")
 
 
 def evaluate_candidate(

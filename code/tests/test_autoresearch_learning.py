@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from conformal_marl.autoresearch.candidate import sample_replay  # noqa: F401
+from conformal_marl.autoresearch import evaluate  # noqa: F401
 from conformal_marl.autoresearch.frozen import learning_benchmark
 from conformal_marl.autoresearch.frozen.learning_benchmark import (
     DEFAULT_LEARNING_SCENARIOS,
@@ -13,6 +13,7 @@ from conformal_marl.autoresearch.frozen.learning_benchmark import (
     LearningScenario,
     run_learning_benchmark,
 )
+from conformal_marl.samplers import get_sampler, uniform_sampler
 
 
 def _tiny_config() -> dict:
@@ -64,6 +65,10 @@ def test_uniform_candidate_matches_paired_uniform_baseline():
     assert scenario["baseline_final_return"] == pytest.approx(
         scenario["candidate_final_return"]
     )
+
+
+def test_candidate_import_cannot_replace_uniform_baseline():
+    assert get_sampler("uniform") is uniform_sampler
 
 
 def test_learning_screen_requires_multiple_seeds_and_eval_curve():
