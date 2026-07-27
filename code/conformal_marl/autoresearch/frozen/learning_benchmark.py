@@ -155,16 +155,18 @@ def run_learning_benchmark(
     num_seeds: int,
     scenarios: Iterable[LearningScenario] = DEFAULT_LEARNING_SCENARIOS,
     control_samplers: tuple[str, ...] = ("uniform",),
-    confidence_z: float = 1.96,
+    screening_z: float = 1.96,
     support_tolerance: float = 0.05,
 ) -> dict:
     """Compare candidate and predeclared replay controls on identical random seeds.
 
     The primary utility is ``0.6 * normalized AUC + 0.4 * normalized final return``.
-    A scored scenario uses the minimum paired lower bound over controls, so promotion
-    requires the candidate to beat every declared control. Support preservation remains
-    anchored to uniform replay. If that gate falls below ``-support_tolerance``, the
-    primary score is capped below zero regardless of gains elsewhere.
+    A scored scenario uses the minimum conservative paired screening bound over controls,
+    so promotion requires the candidate to beat every declared control. This bound is a
+    search heuristic, not a nominal confidence interval: BFTS adaptively reuses the
+    screening seeds. Support preservation remains anchored to uniform replay. If that gate
+    falls below ``-support_tolerance``, the primary score is capped below zero regardless
+    of gains elsewhere.
     """
 
     if num_seeds < 2:
@@ -202,19 +204,19 @@ def run_learning_benchmark(
             final_delta = (candidate_final - control_final) / scenario.return_scale
             paired_delta = 0.6 * (candidate_auc - control_auc) + 0.4 * final_delta
             mean_delta = float(paired_delta.mean())
-            lower_bound = mean_delta - confidence_z * _sem(paired_delta)
+            lower_bound = mean_delta - screening_z * _sem(paired_delta)
             control_results[control_name] = {
                 "paired_utility_delta": paired_delta.tolist(),
                 "mean_utility_delta": mean_delta,
                 "utility_sem": _sem(paired_delta),
-                "lower_confidence_bound": lower_bound,
+                "lower_screening_bound": lower_bound,
                 "control_final_return": control_final.tolist(),
                 "control_auc": control_auc.tolist(),
             }
 
         uniform = control_results["uniform"]
         lower_bound = min(
-            float(value["lower_confidence_bound"])
+            float(value["lower_screening_bound"])
             for value in control_results.values()
         )
 
@@ -224,7 +226,7 @@ def run_learning_benchmark(
             # candidate must never be able to lift primary_score by improving the
             # gate scenario (support-starvation theorem: that trade is null-to-
             # negative and the search must not be steered toward it).
-            if uniform["lower_confidence_bound"] < -support_tolerance:
+            if uniform["lower_screening_bound"] < -support_tolerance:
                 gate_failures.append(scenario.name)
         else:
             lower_bounds.append(lower_bound)
@@ -234,7 +236,7 @@ def run_learning_benchmark(
             "paired_utility_delta": uniform["paired_utility_delta"],
             "mean_utility_delta": uniform["mean_utility_delta"],
             "utility_sem": uniform["utility_sem"],
-            "lower_confidence_bound": uniform["lower_confidence_bound"],
+            "lower_screening_bound": uniform["lower_screening_bound"],
             "worst_control_lower_bound": lower_bound,
             "baseline_final_return": uniform["control_final_return"],
             "candidate_final_return": candidate_final.tolist(),

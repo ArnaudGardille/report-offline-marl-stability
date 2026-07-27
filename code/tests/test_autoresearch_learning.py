@@ -141,7 +141,7 @@ def test_support_gate_improvement_cannot_lift_the_score(monkeypatch):
 
     # Gate is present and would have a large positive delta if it were scored...
     gate = result["scenarios"]["tiny_support"]
-    assert gate["lower_confidence_bound"] > 0.0
+    assert gate["lower_screening_bound"] > 0.0
     # ...but the score is taken from the scored scenario alone.
     assert result["raw_score"] == pytest.approx(0.0)
     assert result["primary_score"] == pytest.approx(0.0)
@@ -173,8 +173,8 @@ def test_primary_score_uses_weakest_paired_control(monkeypatch):
 
     scenario = result["scenarios"]["tiny_scored"]
     assert result["primary_score"] == pytest.approx(
-        scenario["controls"]["strong_control"]["lower_confidence_bound"]
+        scenario["controls"]["strong_control"]["lower_screening_bound"]
     )
     assert result["primary_score"] < scenario["controls"]["uniform"][
-        "lower_confidence_bound"
+        "lower_screening_bound"
     ]

@@ -38,7 +38,7 @@ uv run python -m conformal_marl.autoresearch.evaluate \
   --output outputs/autoresearch_learning.json
 ```
 
-Its score is a lower confidence bound on paired AUC/final-return improvement over
+Its score is a conservative paired screening bound on AUC/final-return improvement over
 uniform replay. Simultaneous-Attack is a support-preservation gate, not a target to game:
 a candidate with a material regression there is rejected even if it improves STORM.
 
