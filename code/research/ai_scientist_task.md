@@ -42,7 +42,10 @@ behavior when a finite batch does not cover every action.
 1. The operator tier estimates the target-policy perceived Bellman backup from replay
    collected under a different behavior policy. It reports exact bias, variance and MSE.
    Candidates scoring below `-0.25` are not promoted.
-2. The learning tier compares the candidate with uniform replay on identical seeds.
+2. The causal-drift tier compares a frozen exogenous teammate-policy switch with a
+   matched no-drift regime. It requires a positive difference-in-differences against
+   uniform and exact-ratio replay without degrading the stationary control.
+3. The learning tier compares the candidate with frozen replay controls on identical seeds.
    Cooperative STORM measures early learning efficiency. Simultaneous-Attack is a hard
    support-preservation gate: a candidate that starves rare optimal joint actions is
    rejected even if it improves STORM.

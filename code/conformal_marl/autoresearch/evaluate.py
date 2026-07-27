@@ -6,6 +6,11 @@ import argparse
 import json
 from pathlib import Path
 
+from conformal_marl.autoresearch.frozen.causal_drift_benchmark import (
+    HELDOUT_CAUSAL_DRIFT_CONFIG,
+    SEARCH_CAUSAL_DRIFT_CONFIG,
+    run_causal_drift_benchmark,
+)
 from conformal_marl.autoresearch.frozen.learning_benchmark import (
     HELDOUT_LEARNING_SCENARIOS,
     run_learning_benchmark,
@@ -73,13 +78,28 @@ def evaluate_candidate(
             control_samplers=control_samplers,
             **({"scenarios": scenarios} if scenarios is not None else {}),
         )
+    if tier == "causal_drift":
+        config = (
+            HELDOUT_CAUSAL_DRIFT_CONFIG
+            if learning_profile == "heldout"
+            else SEARCH_CAUSAL_DRIFT_CONFIG
+        )
+        return run_causal_drift_benchmark(
+            "autoresearch_candidate",
+            seed=seed,
+            num_seeds=num_seeds,
+            config=config,
+            control_samplers=control_samplers,
+        )
     raise ValueError(f"unknown evaluation tier {tier!r}")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Evaluate one constrained replay candidate")
     parser.add_argument(
-        "--tier", choices=("operator", "mechanism", "learning"), default="operator"
+        "--tier",
+        choices=("operator", "mechanism", "causal_drift", "learning"),
+        default="operator",
     )
     parser.add_argument("--seed", type=int, default=20260712)
     parser.add_argument("--trials", type=int, default=128)

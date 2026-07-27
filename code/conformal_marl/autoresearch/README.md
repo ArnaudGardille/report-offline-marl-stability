@@ -38,9 +38,17 @@ uv run python -m conformal_marl.autoresearch.evaluate \
   --output outputs/autoresearch_learning.json
 ```
 
-Its score is a conservative paired screening bound on AUC/final-return improvement over
-uniform replay. Simultaneous-Attack is a support-preservation gate, not a target to game:
-a candidate with a material regression there is rejected even if it improves STORM.
+Before that external learning screen, a frozen causal stage compares a stationary
+partner with an exogenous teammate-policy switch under paired randomness. Its primary
+score is the weakest difference-in-differences bound against uniform and exact-ratio
+replay. A generic replay gain that also appears without drift receives no causal credit,
+and a no-drift regression is a hard rejection.
+
+The learning score is a conservative paired screening bound on AUC/final-return
+improvement over frozen replay controls. Because BFTS adaptively reuses the search seeds,
+this statistic is a ranking heuristic rather than a nominal confidence interval.
+Simultaneous-Attack is a support-preservation gate, not a target to game: a candidate
+with a material regression there is rejected even if it improves STORM.
 
 ## AI Scientist v2 orchestration
 
@@ -64,8 +72,9 @@ Scientist use in any resulting manuscript.
 
 The search sees 8 paired seeds by default. After BFTS stops, the highest-ranked unique
 candidate is frozen and rerun on a distinct master seed with a 128-trial mechanism sweep
-and 32 paired learning seeds. Held-out mechanism axes use unseen action counts, sample
-sizes, noise levels, drift strengths, and scenario seed. Held-out learning changes the
+and 32 paired causal/learning seeds. Held-out mechanism axes use unseen action counts,
+sample sizes, noise levels, drift strengths, and scenario seed. Held-out causal
+evaluation changes the partner intervention and budget; held-out learning changes the
 Simultaneous-Attack agent count and the STORM horizon. The result is confirmatory: it
 cannot select a runner-up, is stored separately, and is never returned to the method
 designer. A failed held-out evaluation therefore rejects the selected candidate instead

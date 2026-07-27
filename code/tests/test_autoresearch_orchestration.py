@@ -28,6 +28,7 @@ def _init_fixture(tmp_path: Path) -> tuple[Path, Path, Path]:
         "code/conformal_marl/replay.py",
         "code/conformal_marl/samplers.py",
         "code/tests/test_autoresearch_operator.py",
+        "code/tests/test_causal_drift_benchmark.py",
         "code/tests/test_autoresearch_learning.py",
         "code/pyproject.toml",
         "code/uv.lock",
@@ -83,16 +84,20 @@ def test_build_search_config_uses_absolute_paths_and_staged_gate(tmp_path: Path)
     ).stdout.strip()
     assert config["base_ref"] == expected_commit
     assert [stage["name"] for stage in config["stages"]] == [
-        "operator", "designed_diagnostic", "mechanism", "learning"
+        "operator", "designed_diagnostic", "mechanism", "causal_drift", "learning"
     ]
     assert config["stages"][0]["minimum_score"] == pytest.approx(-0.25)
     assert "{stage_config}" in config["stages"][1]["command"]
     assert config["stages"][1]["contributes_to_priority"] is False
     assert "{stage_config}" not in config["stages"][2]["command"]
-    learning_command = config["stages"][3]["command"]
+    causal_command = config["stages"][3]["command"]
+    learning_command = config["stages"][4]["command"]
     seed_option = learning_command.index("--num-seeds")
     assert learning_command[seed_option + 1] == "3"
     assert config["stages"][3]["minimum_score"] == pytest.approx(0.001)
+    assert causal_command[causal_command.index("--tier") + 1] == "causal_drift"
+    assert causal_command.count("--control-sampler") == 2
+    assert config["stages"][4]["minimum_score"] == pytest.approx(0.001)
     assert learning_command.count("--control-sampler") == 2
     assert "exact_ratio_floor" in learning_command
     assert config["campaign"]["initial_capacity"] == 2
@@ -100,11 +105,14 @@ def test_build_search_config_uses_absolute_paths_and_staged_gate(tmp_path: Path)
     assert config["campaign"]["finalist_count"] == 1
     assert config["campaign"]["experiment_stage_name"] == "designed_diagnostic"
     assert [stage["name"] for stage in config["final_stages"]] == [
-        "heldout_mechanism", "heldout_learning"
+        "heldout_mechanism", "heldout_causal_drift", "heldout_learning"
     ]
-    heldout_command = config["final_stages"][1]["command"]
+    heldout_causal_command = config["final_stages"][1]["command"]
+    heldout_command = config["final_stages"][2]["command"]
     assert "heldout" in config["final_stages"][0]["command"]
+    assert "heldout" in heldout_causal_command
     assert "heldout" in heldout_command
+    assert heldout_causal_command.count("--control-sampler") == 2
     assert heldout_command.count("--control-sampler") == 2
     heldout_seed_option = heldout_command.index("--num-seeds")
     assert heldout_command[heldout_seed_option + 1] == "4"

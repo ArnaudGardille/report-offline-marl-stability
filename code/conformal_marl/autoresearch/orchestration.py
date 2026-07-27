@@ -19,6 +19,7 @@ FROZEN_PATHS = (
     "code/conformal_marl/replay.py",
     "code/conformal_marl/samplers.py",
     "code/tests/test_autoresearch_operator.py",
+    "code/tests/test_causal_drift_benchmark.py",
     "code/tests/test_autoresearch_learning.py",
     "code/pyproject.toml",
     "code/uv.lock",
@@ -141,6 +142,19 @@ def build_search_config(
                 "required_status": "ok",
             },
             {
+                "name": "causal_drift",
+                "command": [
+                    "{python}", "-m",
+                    "conformal_marl.autoresearch.evaluate",
+                    "--tier", "causal_drift", "--num-seeds", str(learning_seeds),
+                    "--control-sampler", "uniform",
+                    "--control-sampler", "exact_ratio_floor",
+                    "--output", "{output}",
+                ],
+                "minimum_score": 0.001,
+                "required_status": "ok",
+            },
+            {
                 "name": "learning",
                 "command": [
                     "{python}", "-m",
@@ -164,6 +178,19 @@ def build_search_config(
                     "--trials", str(validation_trials), "--output", "{output}",
                 ],
                 "minimum_score": -0.5,
+                "required_status": "ok",
+            },
+            {
+                "name": "heldout_causal_drift",
+                "command": [
+                    "{python}", "-m", "conformal_marl.autoresearch.evaluate",
+                    "--tier", "causal_drift", "--seed", "20260713",
+                    "--learning-profile", "heldout",
+                    "--num-seeds", str(validation_seeds), "--output", "{output}",
+                    "--control-sampler", "uniform",
+                    "--control-sampler", "exact_ratio_floor",
+                ],
+                "minimum_score": 0.001,
                 "required_status": "ok",
             },
             {
