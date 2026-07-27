@@ -79,6 +79,8 @@ the same frozen mechanism sweep after the diagnostic stage. The evaluator fixes
 repetition counts and rejects unknown fields or sweeps above 128 cells. Held-out
 mechanism validation ignores the designed diagnostic.
 
-Learning promotion requires a positive paired screening bound on the scored STORM task
-and no Simultaneous-Attack support regression. Merely completing training is not treated
-as evidence of improved sample efficiency.
+Learning promotion requires a positive paired screening bound against both uniform replay
+and the existing support-floored exact-ratio control on the scored STORM task, with no
+Simultaneous-Attack support regression relative to uniform. The candidate and every
+control use identical seeds. Merely completing training or rediscovering an existing
+control is not treated as evidence of improved sample efficiency.

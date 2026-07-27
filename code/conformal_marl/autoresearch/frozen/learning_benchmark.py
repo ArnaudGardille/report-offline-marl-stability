@@ -154,15 +154,17 @@ def run_learning_benchmark(
     seed: int,
     num_seeds: int,
     scenarios: Iterable[LearningScenario] = DEFAULT_LEARNING_SCENARIOS,
+    control_samplers: tuple[str, ...] = ("uniform",),
     confidence_z: float = 1.96,
     support_tolerance: float = 0.05,
 ) -> dict:
-    """Compare candidate and uniform replay on identical random seeds.
+    """Compare candidate and predeclared replay controls on identical random seeds.
 
     The primary utility is ``0.6 * normalized AUC + 0.4 * normalized final return``.
-    Scenario scores are lower confidence bounds on the paired candidate-minus-uniform
-    utility. If a support-gate scenario falls below ``-support_tolerance``, the primary
-    score is capped below zero regardless of gains elsewhere.
+    A scored scenario uses the minimum paired lower bound over controls, so promotion
+    requires the candidate to beat every declared control. Support preservation remains
+    anchored to uniform replay. If that gate falls below ``-support_tolerance``, the
+    primary score is capped below zero regardless of gains elsewhere.
     """
 
     if num_seeds < 2:
@@ -170,6 +172,12 @@ def run_learning_benchmark(
     scenario_list = tuple(scenarios)
     if not scenario_list:
         raise ValueError("at least one learning scenario is required")
+    if not control_samplers or "uniform" not in control_samplers:
+        raise ValueError("control_samplers must include uniform replay")
+    if candidate_sampler in control_samplers:
+        # This is allowed for deterministic baseline validity tests, but duplicate
+        # controls would waste accelerator work and distort the minimum.
+        control_samplers = tuple(dict.fromkeys(control_samplers))
     for scenario in scenario_list:
         scenario.validate()
 
@@ -180,19 +188,35 @@ def run_learning_benchmark(
     gate_failures = []
 
     for scenario in scenario_list:
-        baseline = _run_sampler(scenario, "uniform", seed_values)
         candidate = _run_sampler(scenario, candidate_sampler, seed_values)
-        baseline_curve = np.asarray(baseline["returns"], dtype=np.float64)
         candidate_curve = np.asarray(candidate["returns"], dtype=np.float64)
-        baseline_final = np.asarray(baseline["end_greedy_return"], dtype=np.float64)
         candidate_final = np.asarray(candidate["end_greedy_return"], dtype=np.float64)
 
-        baseline_auc = baseline_curve.mean(axis=1) / scenario.return_scale
         candidate_auc = candidate_curve.mean(axis=1) / scenario.return_scale
-        final_delta = (candidate_final - baseline_final) / scenario.return_scale
-        paired_delta = 0.6 * (candidate_auc - baseline_auc) + 0.4 * final_delta
-        mean_delta = float(paired_delta.mean())
-        lower_bound = mean_delta - confidence_z * _sem(paired_delta)
+        control_results = {}
+        for control_name in control_samplers:
+            control = _run_sampler(scenario, control_name, seed_values)
+            control_curve = np.asarray(control["returns"], dtype=np.float64)
+            control_final = np.asarray(control["end_greedy_return"], dtype=np.float64)
+            control_auc = control_curve.mean(axis=1) / scenario.return_scale
+            final_delta = (candidate_final - control_final) / scenario.return_scale
+            paired_delta = 0.6 * (candidate_auc - control_auc) + 0.4 * final_delta
+            mean_delta = float(paired_delta.mean())
+            lower_bound = mean_delta - confidence_z * _sem(paired_delta)
+            control_results[control_name] = {
+                "paired_utility_delta": paired_delta.tolist(),
+                "mean_utility_delta": mean_delta,
+                "utility_sem": _sem(paired_delta),
+                "lower_confidence_bound": lower_bound,
+                "control_final_return": control_final.tolist(),
+                "control_auc": control_auc.tolist(),
+            }
+
+        uniform = control_results["uniform"]
+        lower_bound = min(
+            float(value["lower_confidence_bound"])
+            for value in control_results.values()
+        )
 
         if scenario.support_gate:
             # Simultaneous-Attack is a support-preservation gate, not a scored
@@ -200,21 +224,23 @@ def run_learning_benchmark(
             # candidate must never be able to lift primary_score by improving the
             # gate scenario (support-starvation theorem: that trade is null-to-
             # negative and the search must not be steered toward it).
-            if lower_bound < -support_tolerance:
+            if uniform["lower_confidence_bound"] < -support_tolerance:
                 gate_failures.append(scenario.name)
         else:
             lower_bounds.append(lower_bound)
 
         results[scenario.name] = {
             "support_gate": scenario.support_gate,
-            "paired_utility_delta": paired_delta.tolist(),
-            "mean_utility_delta": mean_delta,
-            "utility_sem": _sem(paired_delta),
-            "lower_confidence_bound": lower_bound,
-            "baseline_final_return": baseline_final.tolist(),
+            "paired_utility_delta": uniform["paired_utility_delta"],
+            "mean_utility_delta": uniform["mean_utility_delta"],
+            "utility_sem": uniform["utility_sem"],
+            "lower_confidence_bound": uniform["lower_confidence_bound"],
+            "worst_control_lower_bound": lower_bound,
+            "baseline_final_return": uniform["control_final_return"],
             "candidate_final_return": candidate_final.tolist(),
-            "baseline_auc": baseline_auc.tolist(),
+            "baseline_auc": uniform["control_auc"],
             "candidate_auc": candidate_auc.tolist(),
+            "controls": control_results,
         }
 
     if not lower_bounds:
@@ -227,6 +253,7 @@ def run_learning_benchmark(
         "primary_score": primary_score,
         "raw_score": raw_score,
         "candidate_sampler": candidate_sampler,
+        "control_samplers": list(control_samplers),
         "num_seeds": num_seeds,
         "paired_seeds": seed_values.astype(np.uint64).tolist(),
         "support_gate_failures": gate_failures,

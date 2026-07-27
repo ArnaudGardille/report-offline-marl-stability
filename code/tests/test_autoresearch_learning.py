@@ -84,6 +84,14 @@ def test_learning_screen_requires_multiple_seeds_and_eval_curve():
         run_learning_benchmark(
             "autoresearch_candidate", seed=0, num_seeds=2, scenarios=(invalid,)
         )
+    with pytest.raises(ValueError, match="include uniform"):
+        run_learning_benchmark(
+            "autoresearch_candidate",
+            seed=0,
+            num_seeds=2,
+            scenarios=(TINY_SCORED,),
+            control_samplers=("exact_ratio_floor",),
+        )
 
 
 def test_all_gate_scenarios_are_rejected_as_unscored():
@@ -138,3 +146,35 @@ def test_support_gate_improvement_cannot_lift_the_score(monkeypatch):
     assert result["raw_score"] == pytest.approx(0.0)
     assert result["primary_score"] == pytest.approx(0.0)
     assert result["support_gate_failures"] == []
+
+
+def test_primary_score_uses_weakest_paired_control(monkeypatch):
+    def fake_run_sampler(scenario, sampler_name, seeds):
+        del scenario
+        value = {
+            "candidate": 2.0,
+            "uniform": 0.0,
+            "strong_control": 1.6,
+        }[sampler_name]
+        return {
+            "returns": np.full((len(seeds), 2), value, dtype=np.float64),
+            "end_greedy_return": np.full(len(seeds), value, dtype=np.float64),
+        }
+
+    monkeypatch.setattr(learning_benchmark, "_run_sampler", fake_run_sampler)
+
+    result = run_learning_benchmark(
+        "candidate",
+        seed=0,
+        num_seeds=4,
+        scenarios=(TINY_SCORED,),
+        control_samplers=("uniform", "strong_control"),
+    )
+
+    scenario = result["scenarios"]["tiny_scored"]
+    assert result["primary_score"] == pytest.approx(
+        scenario["controls"]["strong_control"]["lower_confidence_bound"]
+    )
+    assert result["primary_score"] < scenario["controls"]["uniform"][
+        "lower_confidence_bound"
+    ]

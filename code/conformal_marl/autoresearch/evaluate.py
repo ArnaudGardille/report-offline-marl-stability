@@ -34,6 +34,7 @@ def evaluate_candidate(
     mechanism_config: dict | None = None,
     mechanism_profile: str = "search",
     learning_profile: str = "search",
+    control_samplers: tuple[str, ...] = ("uniform",),
 ) -> dict:
     if tier == "operator":
         return run_operator_benchmark(estimate_operator, seed=seed, trials=trials)
@@ -69,6 +70,7 @@ def evaluate_candidate(
             "autoresearch_candidate",
             seed=seed,
             num_seeds=num_seeds,
+            control_samplers=control_samplers,
             **({"scenarios": scenarios} if scenarios is not None else {}),
         )
     raise ValueError(f"unknown evaluation tier {tier!r}")
@@ -89,6 +91,12 @@ def main() -> None:
     parser.add_argument(
         "--learning-profile", choices=("search", "heldout"), default="search"
     )
+    parser.add_argument(
+        "--control-sampler",
+        action="append",
+        dest="control_samplers",
+        help="Repeat to require improvement over multiple fixed controls.",
+    )
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
 
@@ -105,6 +113,7 @@ def main() -> None:
         mechanism_config=mechanism_config,
         mechanism_profile=args.mechanism_profile,
         learning_profile=args.learning_profile,
+        control_samplers=tuple(args.control_samplers or ("uniform",)),
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, indent=2, sort_keys=True), encoding="utf-8")
