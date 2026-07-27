@@ -14,6 +14,8 @@ FROZEN_PATHS = (
     "code/conformal_marl/autoresearch/frozen",
     "code/conformal_marl/envs",
     "code/conformal_marl/iql.py",
+    "code/conformal_marl/networks.py",
+    "code/conformal_marl/conformal.py",
     "code/conformal_marl/replay.py",
     "code/conformal_marl/samplers.py",
     "code/tests/test_autoresearch_operator.py",
@@ -23,14 +25,15 @@ FROZEN_PATHS = (
 )
 
 
-def _git_ref_exists(repository: Path, ref: str) -> bool:
+def _resolve_git_ref(repository: Path, ref: str) -> str | None:
     result = subprocess.run(
         ["git", "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"],
         cwd=repository,
+        text=True,
         capture_output=True,
         check=False,
     )
-    return result.returncode == 0
+    return result.stdout.strip() if result.returncode == 0 else None
 
 
 def build_search_config(
@@ -62,9 +65,10 @@ def build_search_config(
     candidate = repository / "code/conformal_marl/autoresearch/candidate"
     launcher = orchestrator / "launch_hierarchical_campaign.py"
 
-    if not (repository / ".git").exists() and not _git_ref_exists(repository, "HEAD"):
+    if not (repository / ".git").exists() and not _resolve_git_ref(repository, "HEAD"):
         raise ValueError(f"not a Git repository: {repository}")
-    if not _git_ref_exists(repository, base_ref):
+    base_commit = _resolve_git_ref(repository, base_ref)
+    if base_commit is None:
         raise ValueError(f"Git ref {base_ref!r} does not exist in {repository}")
     if not candidate.is_dir():
         raise ValueError(f"candidate contract is missing: {candidate}")
@@ -94,7 +98,9 @@ def build_search_config(
 
     return {
         "repository": str(repository),
-        "base_ref": base_ref,
+        # A symbolic branch can advance during a long campaign. Every disposable
+        # worktree must instead start from this immutable preflight commit.
+        "base_ref": base_commit,
         "candidate_path": "code/conformal_marl/autoresearch/candidate",
         "working_subdir": "code",
         "shared_python": str(shared_python),

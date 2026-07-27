@@ -54,7 +54,8 @@ uv run python scripts/prepare_ai_scientist.py \
 ```
 
 The command validates the Git ref, candidate package, shared `uv` interpreter, and every
-frozen path, then prints the exact hierarchical-campaign command. Each worktree imports
+frozen path, resolves the base ref to an immutable commit SHA, then prints the exact
+hierarchical-campaign command. Each worktree imports
 its own candidate through `PYTHONPATH` while reusing the prepared dependency environment,
 which avoids reinstalling JAX for every node. Search outputs remain under ignored
 `code/outputs/`; only reviewed candidate code and reproducible aggregate figures belong

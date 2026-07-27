@@ -23,6 +23,8 @@ def _init_fixture(tmp_path: Path) -> tuple[Path, Path, Path]:
         "code/conformal_marl/autoresearch/api.py",
         "code/conformal_marl/autoresearch/evaluate.py",
         "code/conformal_marl/iql.py",
+        "code/conformal_marl/networks.py",
+        "code/conformal_marl/conformal.py",
         "code/conformal_marl/replay.py",
         "code/conformal_marl/samplers.py",
         "code/tests/test_autoresearch_operator.py",
@@ -72,6 +74,14 @@ def test_build_search_config_uses_absolute_paths_and_staged_gate(tmp_path: Path)
     assert Path(config["task_context_file"]).is_absolute()
     assert Path(config["shared_python"]).is_absolute()
     assert config["shared_python"] == str(shared_python)
+    expected_commit = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        text=True,
+        capture_output=True,
+        check=True,
+    ).stdout.strip()
+    assert config["base_ref"] == expected_commit
     assert [stage["name"] for stage in config["stages"]] == [
         "operator", "mechanism", "learning", "designed_diagnostic"
     ]
