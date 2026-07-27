@@ -73,22 +73,27 @@ def test_build_search_config_uses_absolute_paths_and_staged_gate(tmp_path: Path)
     assert Path(config["shared_python"]).is_absolute()
     assert config["shared_python"] == str(shared_python)
     assert [stage["name"] for stage in config["stages"]] == [
-        "operator", "mechanism", "learning"
+        "operator", "designed_diagnostic", "mechanism", "learning"
     ]
     assert config["stages"][0]["minimum_score"] == pytest.approx(-0.25)
     assert "{stage_config}" in config["stages"][1]["command"]
-    learning_command = config["stages"][2]["command"]
+    assert config["stages"][1]["contributes_to_priority"] is False
+    assert "{stage_config}" not in config["stages"][2]["command"]
+    learning_command = config["stages"][3]["command"]
     seed_option = learning_command.index("--num-seeds")
     assert learning_command[seed_option + 1] == "3"
+    assert config["stages"][3]["minimum_score"] == pytest.approx(0.001)
     assert config["campaign"]["initial_capacity"] == 2
     assert config["campaign"]["max_nodes"] == 4
     assert config["campaign"]["finalist_count"] == 1
+    assert config["campaign"]["experiment_stage_name"] == "designed_diagnostic"
     assert [stage["name"] for stage in config["final_stages"]] == [
         "heldout_mechanism", "heldout_learning"
     ]
     heldout_command = config["final_stages"][1]["command"]
     heldout_seed_option = heldout_command.index("--num-seeds")
     assert heldout_command[heldout_seed_option + 1] == "4"
+    assert config["final_stages"][1]["minimum_score"] == pytest.approx(0.001)
     assert len(config["research_lenses"]) == 5
 
 
