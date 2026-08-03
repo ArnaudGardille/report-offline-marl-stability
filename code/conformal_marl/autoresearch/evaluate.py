@@ -22,6 +22,8 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 from conformal_marl.samplers import assert_baseline_integrity  # isort: skip
 from conformal_marl.autoresearch.frozen.learning_benchmark import (  # isort: skip
+    DEFAULT_LEARNING_SCENARIOS,
+    HELDOUT_LEARNING_SCENARIOS,
     run_learning_benchmark,
 )
 from conformal_marl.autoresearch.frozen.mechanism_benchmark import (  # isort: skip
@@ -46,6 +48,16 @@ assert_baseline_integrity()
 DEFAULT_NUM_SEEDS = 8
 DEFAULT_TRIALS = 128
 
+# The search profile screens candidates; the held-out profile confirms the single
+# frozen finalist on a shifted task distribution. Selecting by name through this table
+# (rather than by truth-testing a string) means an unrecognised profile raises instead
+# of silently falling back to the search benchmark and being recorded as a held-out
+# result.
+LEARNING_PROFILES = {
+    "search": DEFAULT_LEARNING_SCENARIOS,
+    "heldout": HELDOUT_LEARNING_SCENARIOS,
+}
+
 
 def evaluate_candidate(
     *,
@@ -54,6 +66,7 @@ def evaluate_candidate(
     trials: int,
     num_seeds: int = DEFAULT_NUM_SEEDS,
     mechanism_config: dict | None = None,
+    learning_profile: str = "search",
 ) -> dict:
     if tier == "operator":
         return run_operator_benchmark(estimate_operator, seed=seed, trials=trials)
@@ -65,8 +78,18 @@ def evaluate_candidate(
         config = MechanismSweepConfig.from_dict(payload)
         return run_mechanism_benchmark(estimate_operator, seed=seed, config=config)
     if tier == "learning":
+        try:
+            scenarios = LEARNING_PROFILES[learning_profile]
+        except KeyError:
+            raise ValueError(
+                f"unknown learning profile {learning_profile!r}; "
+                f"expected one of {sorted(LEARNING_PROFILES)}"
+            ) from None
         return run_learning_benchmark(
-            "autoresearch_candidate", seed=seed, num_seeds=num_seeds
+            "autoresearch_candidate",
+            seed=seed,
+            num_seeds=num_seeds,
+            scenarios=scenarios,
         )
     raise ValueError(f"unknown evaluation tier {tier!r}")
 
@@ -80,6 +103,9 @@ def main() -> None:
     parser.add_argument("--trials", type=int, default=DEFAULT_TRIALS)
     parser.add_argument("--num-seeds", type=int, default=DEFAULT_NUM_SEEDS)
     parser.add_argument("--mechanism-config", type=Path)
+    parser.add_argument(
+        "--learning-profile", choices=sorted(LEARNING_PROFILES), default="search"
+    )
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
 
@@ -94,6 +120,7 @@ def main() -> None:
         trials=args.trials,
         num_seeds=args.num_seeds,
         mechanism_config=mechanism_config,
+        learning_profile=args.learning_profile,
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, indent=2, sort_keys=True), encoding="utf-8")

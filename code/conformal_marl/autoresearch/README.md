@@ -88,7 +88,11 @@ sandbox above is what actually contains it.
 
 The search sees 8 paired seeds by default. After BFTS stops, the highest-ranked unique
 candidate is frozen and rerun on a distinct master seed with a 128-trial mechanism sweep
-and 32 paired learning seeds. The held-out result is confirmatory: it cannot select a
+and 32 paired learning seeds. The held-out *learning* stage also shifts the task itself:
+a fourth Simultaneous-Attack agent and a longer STORM horizon, neither seen during
+search. The held-out *mechanism* stage re-runs the frozen sweep on a new seed only, so
+it confirms against fresh randomness rather than a shifted task distribution -- do not
+describe it as a distribution-shift test. The held-out result is confirmatory: it cannot select a
 runner-up, is stored separately, and is never returned to the method designer. A failed
 held-out evaluation therefore rejects the selected candidate instead of turning the final
 benchmark into another tuning set.
