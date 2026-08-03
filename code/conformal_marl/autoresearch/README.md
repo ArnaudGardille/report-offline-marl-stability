@@ -72,9 +72,12 @@ The experimentalist may configure a search-only diagnostic sweep within validate
 (actions, sample sizes, drift strengths, noise, coverage, and scenario seed). This stage
 is recorded but never contributes to cross-candidate ranking, because two candidates
 tested on different designs do not have comparable scores. Every candidate is ranked on
-the same frozen mechanism sweep after the diagnostic stage. The evaluator fixes
-repetition counts and rejects unknown fields or sweeps above 128 cells. Held-out
-mechanism validation ignores the designed diagnostic.
+the same frozen mechanism sweep. The diagnostic runs last, after every ranked stage:
+the evaluator stops at the first failing stage, so a designed sweep that is rejected or
+crashes earlier in the sequence would depress that candidate's ranking score and stage
+count for reasons unrelated to its replay mechanism. The evaluator fixes repetition
+counts and rejects unknown fields or sweeps above 128 cells. Held-out mechanism
+validation ignores the designed diagnostic.
 
 Learning promotion requires a positive paired screening bound on the scored STORM task
 and no Simultaneous-Attack support regression. Merely completing training is not treated

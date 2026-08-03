@@ -73,16 +73,32 @@ def test_build_search_config_uses_absolute_paths_and_staged_gate(tmp_path: Path)
     assert Path(config["shared_python"]).is_absolute()
     assert config["shared_python"] == str(shared_python)
     assert [stage["name"] for stage in config["stages"]] == [
-        "operator", "designed_diagnostic", "mechanism", "learning"
+        "operator", "mechanism", "learning", "designed_diagnostic"
     ]
-    assert config["stages"][0]["minimum_score"] == pytest.approx(-0.25)
-    assert "{stage_config}" in config["stages"][1]["command"]
-    assert config["stages"][1]["contributes_to_priority"] is False
-    assert "{stage_config}" not in config["stages"][2]["command"]
-    learning_command = config["stages"][3]["command"]
+    stages = {stage["name"]: stage for stage in config["stages"]}
+    # Every stage a candidate is ranked on must run on frozen evidence, never on
+    # the sweep that candidate designed for itself.
+    ranked = [
+        stage for stage in config["stages"]
+        if stage.get("contributes_to_priority", True)
+    ]
+    assert ranked, "at least one stage must contribute to ranking"
+    assert all("{stage_config}" not in stage["command"] for stage in ranked)
+    # The evaluator breaks its stage loop on the first failure, so a diagnostic
+    # placed ahead of a ranked stage could still suppress that candidate.
+    diagnostic_index = config["stages"].index(stages["designed_diagnostic"])
+    assert all(
+        config["stages"].index(stage) < diagnostic_index for stage in ranked
+    )
+    assert stages["designed_diagnostic"]["contributes_to_priority"] is False
+    assert "minimum_score" not in stages["designed_diagnostic"]
+    assert "{stage_config}" in stages["designed_diagnostic"]["command"]
+    assert stages["operator"]["minimum_score"] == pytest.approx(-0.25)
+    assert stages["mechanism"]["minimum_score"] == pytest.approx(-0.5)
+    learning_command = stages["learning"]["command"]
     seed_option = learning_command.index("--num-seeds")
     assert learning_command[seed_option + 1] == "3"
-    assert config["stages"][3]["minimum_score"] == pytest.approx(0.001)
+    assert stages["learning"]["minimum_score"] == pytest.approx(0.001)
     assert config["campaign"]["initial_capacity"] == 2
     assert config["campaign"]["max_nodes"] == 4
     assert config["campaign"]["finalist_count"] == 1

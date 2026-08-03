@@ -112,18 +112,6 @@ def build_search_config(
                 "required_status": "ok",
             },
             {
-                "name": "designed_diagnostic",
-                "command": [
-                    "{python}", "-m",
-                    "conformal_marl.autoresearch.evaluate",
-                    "--tier", "mechanism", "--trials", "32",
-                    "--mechanism-config", "{stage_config}",
-                    "--output", "{output}",
-                ],
-                "contributes_to_priority": False,
-                "required_status": "ok",
-            },
-            {
                 "name": "mechanism",
                 "command": [
                     "{python}", "-m",
@@ -143,6 +131,24 @@ def build_search_config(
                     "--output", "{output}",
                 ],
                 "minimum_score": 0.001,
+                "required_status": "ok",
+            },
+            # Ranking must not depend on the experiment a candidate designed for
+            # itself. The evaluator breaks its stage loop on the first failure, so
+            # a designed sweep that is rejected or crashes ahead of the frozen
+            # stages would suppress this candidate's ranking score and stage
+            # count. Running it last keeps every candidate ranked on the same
+            # frozen evidence and leaves this stage purely diagnostic.
+            {
+                "name": "designed_diagnostic",
+                "command": [
+                    "{python}", "-m",
+                    "conformal_marl.autoresearch.evaluate",
+                    "--tier", "mechanism", "--trials", "32",
+                    "--mechanism-config", "{stage_config}",
+                    "--output", "{output}",
+                ],
+                "contributes_to_priority": False,
                 "required_status": "ok",
             },
         ],
