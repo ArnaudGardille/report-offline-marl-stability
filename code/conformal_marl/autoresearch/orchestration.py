@@ -8,7 +8,15 @@ import subprocess
 from pathlib import Path
 
 
+# The transitive import closure of the frozen evaluator, not just the modules it
+# names directly. The evaluator hashes exactly these paths before and after each
+# candidate runs, so anything reachable from an import but absent here can be
+# rewritten mid-evaluation without tripping the integrity check. The package
+# __init__ files are part of that closure: importing any frozen module executes
+# them first.
 FROZEN_PATHS = (
+    "code/conformal_marl/__init__.py",
+    "code/conformal_marl/autoresearch/__init__.py",
     "code/conformal_marl/autoresearch/api.py",
     "code/conformal_marl/autoresearch/evaluate.py",
     "code/conformal_marl/autoresearch/frozen",
@@ -98,8 +106,11 @@ def build_search_config(
 
     return {
         "repository": str(repository),
-        # A symbolic branch can advance during a long campaign. Every disposable
-        # worktree must instead start from this immutable preflight commit.
+        # The launcher already resolves its base ref to a SHA when a campaign
+        # starts, so worktrees within one campaign were never unpinned. Recording
+        # the commit here closes the remaining window between generating this
+        # config and an operator running the printed command, and makes the
+        # config self-describing about which tree it was validated against.
         "base_ref": base_commit,
         "candidate_path": "code/conformal_marl/autoresearch/candidate",
         "working_subdir": "code",
