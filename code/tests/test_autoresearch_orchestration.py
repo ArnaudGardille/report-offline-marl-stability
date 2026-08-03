@@ -20,9 +20,13 @@ def _init_fixture(tmp_path: Path) -> tuple[Path, Path, Path]:
     (orchestrator / "launch_hierarchical_campaign.py").write_text("")
     (repo / "code/conformal_marl/autoresearch/frozen").mkdir(parents=True)
     for path in (
+        "code/conformal_marl/__init__.py",
+        "code/conformal_marl/autoresearch/__init__.py",
         "code/conformal_marl/autoresearch/api.py",
         "code/conformal_marl/autoresearch/evaluate.py",
         "code/conformal_marl/iql.py",
+        "code/conformal_marl/networks.py",
+        "code/conformal_marl/conformal.py",
         "code/conformal_marl/replay.py",
         "code/conformal_marl/samplers.py",
         "code/tests/test_autoresearch_operator.py",
@@ -72,6 +76,23 @@ def test_build_search_config_uses_absolute_paths_and_staged_gate(tmp_path: Path)
     assert Path(config["task_context_file"]).is_absolute()
     assert Path(config["shared_python"]).is_absolute()
     assert config["shared_python"] == str(shared_python)
+    expected_commit = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        text=True,
+        capture_output=True,
+        check=True,
+    ).stdout.strip()
+    assert config["base_ref"] == expected_commit
+    # The evaluator only hashes the paths listed here, so every module reachable
+    # from a frozen import must appear or it can be rewritten mid-evaluation.
+    for reachable in (
+        "code/conformal_marl/__init__.py",
+        "code/conformal_marl/autoresearch/__init__.py",
+        "code/conformal_marl/networks.py",
+        "code/conformal_marl/conformal.py",
+    ):
+        assert reachable in config["frozen_paths"]
     assert [stage["name"] for stage in config["stages"]] == [
         "operator", "mechanism", "learning", "designed_diagnostic"
     ]
@@ -111,6 +132,71 @@ def test_build_search_config_uses_absolute_paths_and_staged_gate(tmp_path: Path)
     assert heldout_command[heldout_seed_option + 1] == "4"
     assert config["final_stages"][1]["minimum_score"] == pytest.approx(0.001)
     assert len(config["research_lenses"]) == 5
+
+
+def test_build_search_config_pins_a_moving_branch_to_a_commit(tmp_path: Path):
+    """A symbolic branch is the case this pinning exists for, not `HEAD`."""
+
+    repo, orchestrator, context = _init_fixture(tmp_path)
+    shared_python = tmp_path / "venv-python"
+    shared_python.write_text("")
+    branch = subprocess.run(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+        cwd=repo,
+        text=True,
+        capture_output=True,
+        check=True,
+    ).stdout.strip()
+    config = build_search_config(
+        repository=repo,
+        orchestrator=orchestrator,
+        base_ref=branch,
+        output_dir=tmp_path / "results",
+        task_context_file=context,
+        shared_python=shared_python,
+    )
+    pinned = config["base_ref"]
+    assert pinned != branch
+    assert len(pinned) == 40
+
+    # Advancing the branch must not change what the generated config points at.
+    (repo / "code/pyproject.toml").write_text("moved")
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(
+        [
+            "git", "-c", "user.name=Test", "-c", "user.email=test@example.com",
+            "commit", "-qm", "advance",
+        ],
+        cwd=repo,
+        check=True,
+    )
+    assert config["base_ref"] == pinned
+    assert (
+        subprocess.run(
+            ["git", "rev-parse", branch],
+            cwd=repo,
+            text=True,
+            capture_output=True,
+            check=True,
+        ).stdout.strip()
+        != pinned
+    )
+
+
+def test_build_search_config_rejects_incomplete_frozen_closure(tmp_path: Path):
+    repo, orchestrator, context = _init_fixture(tmp_path)
+    shared_python = tmp_path / "venv-python"
+    shared_python.write_text("")
+    (repo / "code/conformal_marl/conformal.py").unlink()
+    with pytest.raises(ValueError, match="frozen benchmark paths are missing"):
+        build_search_config(
+            repository=repo,
+            orchestrator=orchestrator,
+            base_ref="HEAD",
+            output_dir=tmp_path / "results",
+            task_context_file=context,
+            shared_python=shared_python,
+        )
 
 
 def test_build_search_config_rejects_unknown_ref(tmp_path: Path):
