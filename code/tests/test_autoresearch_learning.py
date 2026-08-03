@@ -272,3 +272,72 @@ def test_scenario_fingerprint_tracks_the_measured_budget():
     )
     assert base.fingerprint() == same.fingerprint()
     assert base.fingerprint() != changed.fingerprint()
+
+
+def test_baseline_integrity_rejects_a_displaced_control(monkeypatch):
+    """A hostile candidate, not the benign shipped one.
+
+    The previous version of this guard asserted ``get_sampler("uniform") is
+    uniform_sampler`` against the shipped candidate, which never touches the
+    registry -- so it passed with the entire production change reverted.
+    """
+    from conformal_marl import samplers
+
+    def impostor(*args, **kwargs):  # pragma: no cover - never invoked
+        raise AssertionError("the impostor control must never run")
+
+    monkeypatch.setitem(samplers._SAMPLER_REGISTRY, "uniform", impostor)
+    with pytest.raises(RuntimeError, match="no longer the frozen implementation"):
+        samplers.assert_baseline_integrity("uniform")
+
+
+def test_baseline_integrity_covers_every_sealed_control():
+    """Not just ``uniform`` -- any sampler used as a control arm must be sealed."""
+    from conformal_marl import samplers
+
+    sealed = samplers.trusted_baselines()
+    assert {"uniform", "exact_ratio_floor"} <= set(sealed)
+    samplers.assert_baseline_integrity()  # all of them, unmodified
+
+
+def test_learning_screen_refuses_to_score_against_a_modified_control(monkeypatch):
+    """The check must bite where the control is *used*, not only at import."""
+    from conformal_marl import samplers
+
+    monkeypatch.setitem(
+        samplers._SAMPLER_REGISTRY, "uniform", lambda *a, **k: None
+    )
+    with pytest.raises(RuntimeError, match="no longer the frozen implementation"):
+        run_learning_benchmark(
+            "autoresearch_candidate", seed=7, num_seeds=2, scenarios=(TINY_SCORED,)
+        )
+
+
+def test_frozen_scorers_are_imported_before_candidate_code():
+    """Pin the load-bearing import order.
+
+    Nothing else enforces it: ruff's isort rule is not enabled for this project, so a
+    future ``ruff --select I --fix`` (or any import sorter) would silently reorder
+    these and reopen the pre-import ``sys.modules`` window.
+    """
+    import ast
+    import pathlib
+
+    import conformal_marl.autoresearch.evaluate as evaluate_module
+
+    source = pathlib.Path(evaluate_module.__file__).read_text(encoding="utf-8")
+    frozen_at = None
+    candidate_at = None
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.ImportFrom) or node.module is None:
+            continue
+        if node.module.startswith("conformal_marl.autoresearch.frozen"):
+            frozen_at = node.lineno if frozen_at is None else min(frozen_at, node.lineno)
+        if node.module.startswith("conformal_marl.autoresearch.candidate"):
+            candidate_at = node.lineno
+
+    assert frozen_at is not None and candidate_at is not None
+    assert frozen_at < candidate_at, (
+        "the frozen scorers must be imported before the generated candidate module, "
+        "so the baseline snapshot is sealed before untrusted code runs"
+    )

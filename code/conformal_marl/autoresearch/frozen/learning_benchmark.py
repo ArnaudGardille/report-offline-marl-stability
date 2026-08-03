@@ -20,6 +20,7 @@ from scipy import stats
 
 from conformal_marl.envs.registry import make_env
 from conformal_marl.iql import make_train
+from conformal_marl.samplers import assert_baseline_integrity
 
 # Score assigned to a candidate that regresses a support gate. Sorting by
 # ``primary_score`` alone must rank such a candidate below *every* gate-passing one,
@@ -203,6 +204,10 @@ def run_learning_benchmark(
     gate_failures = []
 
     for scenario in scenario_list:
+        # Re-checked per scenario rather than once at import: ``make_train`` resolves
+        # the sampler by name at call time, and the candidate's own arm has already
+        # executed by the second iteration.
+        assert_baseline_integrity("uniform")
         baseline = _run_sampler(scenario, "uniform", seed_values)
         candidate = _run_sampler(scenario, candidate_sampler, seed_values)
         baseline_curve = np.asarray(baseline["returns"], dtype=np.float64)
