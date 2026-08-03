@@ -176,8 +176,24 @@ def run_learning_benchmark(
     """Compare candidate and uniform replay on identical random seeds.
 
     The primary utility is ``0.6 * normalized mean training return + 0.4 * normalized
-    final return``. Scenario scores are one-sided Student-t lower confidence bounds on
+    final return``. Scenario scores are one-sided Student-t lower *screening* bounds on
     the paired candidate-minus-uniform utility (see :func:`_critical_value`).
+
+    They are deliberately not called confidence bounds. The arithmetic is that of a
+    one-sided 97.5% bound, but nothing here carries the coverage that name implies:
+
+    * BFTS evaluates every node against the *same* fixed seed set, so the bounds across
+      a campaign are neither independent nor a single pre-registered test.
+    * The candidate whose bound is reported is the argmax over that campaign, so the
+      reported value is subject to the winner's curse; conditional on being selected it
+      is biased upward.
+    * No multiplicity adjustment is applied across the ~12 nodes of a campaign.
+
+    Read them as a *ranking and promotion statistic* that is conservative relative to
+    the raw mean, not as an interval with 97.5% coverage of the true improvement. The
+    confirmatory held-out stage is closer to a genuine pre-registered test -- one frozen
+    candidate, fresh master seed, fresh scenarios -- but it inherits the selection that
+    chose the candidate, so it bounds the finalist's performance, not the search's.
 
     A support-gate scenario is judged by a *non-inferiority* test: the candidate passes
     only if its lower bound stays above ``-support_tolerance``, so a candidate that is
@@ -239,7 +255,7 @@ def run_learning_benchmark(
             "paired_utility_delta": paired_delta.tolist(),
             "mean_utility_delta": mean_delta,
             "utility_sem": _sem(paired_delta),
-            "lower_confidence_bound": lower_bound,
+            "lower_screening_bound": lower_bound,
             "baseline_final_return": baseline_final.tolist(),
             "candidate_final_return": candidate_final.tolist(),
             "baseline_auc": baseline_auc.tolist(),
