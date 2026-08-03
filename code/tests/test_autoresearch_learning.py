@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import numpy as np
 import pytest
 
@@ -122,3 +124,151 @@ def test_support_gate_improvement_cannot_lift_the_score(monkeypatch):
     assert result["raw_score"] == pytest.approx(0.0)
     assert result["primary_score"] == pytest.approx(0.0)
     assert result["support_gate_failures"] == []
+
+
+def _constant_run_sampler(gate_value: float, scored_value: float):
+    """``_run_sampler`` stub: flat curves at a per-scenario, per-arm constant."""
+
+    def fake_run_sampler(scenario, sampler_name, seeds):
+        n = len(seeds)
+        if sampler_name == "uniform":
+            value = 0.0
+        else:
+            value = gate_value if scenario.support_gate else scored_value
+        return {
+            "returns": np.full((n, 2), value, dtype=np.float64),
+            "end_greedy_return": np.full(n, value, dtype=np.float64),
+        }
+
+    return fake_run_sampler
+
+
+def test_support_regression_hard_rejects_the_candidate(monkeypatch):
+    """A candidate that starves the gate is rejected however well it screens.
+
+    This is the safety mechanism the whole tier rests on: the candidate below buys
+    a large STORM-side gain with a large Simultaneous-Attack regression.
+    """
+    monkeypatch.setattr(
+        learning_benchmark,
+        "_run_sampler",
+        _constant_run_sampler(gate_value=-100.0, scored_value=100.0),
+    )
+
+    result = run_learning_benchmark(
+        "greedy_candidate", seed=0, num_seeds=4, scenarios=TINY_SCENARIOS
+    )
+
+    assert result["status"] == "support_regression"
+    assert result["support_gate_failures"] == ["tiny_support"]
+    # The uncapped score is kept for diagnosis, but must not be the ranking key.
+    assert result["raw_score"] > 0.0
+    assert result["primary_score"] == learning_benchmark.REJECTED_SCORE
+
+
+def test_gate_failure_ranks_below_every_passing_candidate(monkeypatch):
+    """Rejection must be -inf, not a finite cap.
+
+    A finite cap of ``-support_tolerance`` let a gate-failing candidate outrank a
+    gate-*passing* one that merely scored worse than the cap, so ranking on
+    ``primary_score`` alone silently readmitted rejected candidates.
+    """
+    monkeypatch.setattr(
+        learning_benchmark,
+        "_run_sampler",
+        _constant_run_sampler(gate_value=-100.0, scored_value=100.0),
+    )
+    rejected = run_learning_benchmark(
+        "gate_breaker", seed=0, num_seeds=4, scenarios=TINY_SCENARIOS
+    )
+
+    # A candidate that preserves support but screens badly -- far worse than the
+    # old -support_tolerance cap of -0.05.
+    monkeypatch.setattr(
+        learning_benchmark,
+        "_run_sampler",
+        _constant_run_sampler(gate_value=0.0, scored_value=-100.0),
+    )
+    passing = run_learning_benchmark(
+        "weak_but_safe", seed=0, num_seeds=4, scenarios=TINY_SCENARIOS
+    )
+
+    assert passing["status"] == "ok"
+    assert passing["primary_score"] < -0.05
+    assert rejected["primary_score"] < passing["primary_score"]
+    assert max(rejected, passing, key=lambda r: r["primary_score"]) is passing
+
+
+def test_rejected_score_survives_the_json_round_trip(monkeypatch):
+    """``evaluate.py`` persists results as JSON; -inf must come back as -inf."""
+    monkeypatch.setattr(
+        learning_benchmark,
+        "_run_sampler",
+        _constant_run_sampler(gate_value=-100.0, scored_value=100.0),
+    )
+    result = run_learning_benchmark(
+        "gate_breaker", seed=0, num_seeds=4, scenarios=TINY_SCENARIOS
+    )
+    restored = json.loads(json.dumps(result, sort_keys=True))
+    assert restored["primary_score"] == learning_benchmark.REJECTED_SCORE
+    assert restored["status"] == "support_regression"
+
+
+def test_interval_uses_a_t_quantile_not_the_normal_approximation(monkeypatch):
+    """The lower bound must widen as seeds get scarcer.
+
+    With an estimated standard error the statistic is t-distributed. Pinning 1.96
+    (the normal quantile) understates the interval by 6.5x at 2 seeds, which makes
+    the non-inferiority gate stop rejecting real regressions.
+    """
+    assert learning_benchmark._critical_value(8, 0.975) == pytest.approx(2.3646, abs=1e-3)
+    assert learning_benchmark._critical_value(2, 0.975) == pytest.approx(12.706, abs=1e-2)
+
+    def noisy_run_sampler(scenario, sampler_name, seeds):
+        n = len(seeds)
+        base = np.zeros(n, dtype=np.float64)
+        # Candidate has mean 0 but real seed-to-seed spread, so the lower bound is
+        # driven entirely by the critical value.
+        cand = np.linspace(-1.0, 1.0, n)
+        value = base if sampler_name == "uniform" else cand
+        return {
+            "returns": np.repeat(value[:, None], 2, axis=1),
+            "end_greedy_return": value,
+        }
+
+    monkeypatch.setattr(learning_benchmark, "_run_sampler", noisy_run_sampler)
+    result = run_learning_benchmark(
+        "noisy", seed=0, num_seeds=4, scenarios=(TINY_SCORED,)
+    )
+    scenario = result["scenarios"]["tiny_scored"]
+    expected = -learning_benchmark._critical_value(4, 0.975) * scenario["utility_sem"]
+    assert scenario["mean_utility_delta"] == pytest.approx(0.0)
+    assert scenario["lower_confidence_bound"] == pytest.approx(expected)
+    # Strictly wider than the normal approximation it replaced.
+    assert scenario["lower_confidence_bound"] < -1.96 * scenario["utility_sem"]
+
+
+def test_frozen_scenarios_reject_in_place_mutation():
+    """Candidate code shares this process, so pinned budgets must be read-only."""
+    scenario = learning_benchmark.DEFAULT_LEARNING_SCENARIOS[0]
+    with pytest.raises(TypeError):
+        scenario.config_overrides["total_timesteps"] = 1
+    with pytest.raises(TypeError):
+        scenario.env_kwargs["num_agents"] = 99
+
+
+def test_scenario_fingerprint_tracks_the_measured_budget():
+    """A reported score is tied to the exact budget that produced it."""
+    base = LearningScenario(
+        name="fp", env_name="simu", config_overrides=_tiny_config(), return_scale=4.0
+    )
+    same = LearningScenario(
+        name="fp", env_name="simu", config_overrides=_tiny_config(), return_scale=4.0
+    )
+    retuned = dict(_tiny_config())
+    retuned["total_timesteps"] = 999_999
+    changed = LearningScenario(
+        name="fp", env_name="simu", config_overrides=retuned, return_scale=4.0
+    )
+    assert base.fingerprint() == same.fingerprint()
+    assert base.fingerprint() != changed.fingerprint()

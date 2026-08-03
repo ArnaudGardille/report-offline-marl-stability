@@ -20,6 +20,10 @@ dependencies = [
     "optax",
     "flashbax",
     "numpy",
+    # Student-t quantiles for the autoresearch learning screen's confidence bounds
+    # (conformal_marl/autoresearch/frozen/learning_benchmark.py). Already present
+    # transitively via jax; pinned as a direct dep because we import it directly.
+    "scipy",
     # Plotting for the ablation script (scripts/ablation.py). Already present
     # transitively; pinned as a direct dep so the committed ablation figure is
     # reproducible from a clean install.
