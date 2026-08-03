@@ -45,14 +45,20 @@ of scope**: IQL is discrete; those need MADDPG, deferred):
 * ``simu`` -- the project's custom :class:`SimultaneousAttack` (one-step coordination
   bandit), memoryless -> feed-forward.
 
+* ``storm_2p`` -- the 2-player in-the-Matrix game (JaxMARL ``InTheGrid_2p``), which
+  exposes tuple-valued agent data and structured observations. :class:`StormAdapter`
+  maps that API to the per-agent dictionaries consumed by IQL and flattens each
+  agent's view and inventory. The factory uses a symmetric common-payoff matrix by
+  default, making this entry a cooperative coordination benchmark rather than the
+  library's general-sum Prisoner's Dilemma. Exactly 2 agents (the underlying env
+  hardcodes a red/blue pair); other counts raise from the factory.
+
 Known-incompatible (instantiable, but **not** runnable by the per-agent IQL loop):
 
-* ``storm`` / ``storm_2p`` -- the in-the-Matrix games expose tuple-valued agent data
-  and structured observations. :class:`StormAdapter` maps that API to the per-agent
-  dictionaries consumed by IQL and flattens each agent's view and inventory. The
-  factory uses a symmetric common-payoff matrix by default, making this entry a
-  cooperative coordination benchmark rather than the library's general-sum Prisoner's
-  Dilemma.
+* ``storm`` -- the *N-player* in-the-Matrix game (JaxMARL ``InTheGrid``) returns obs
+  as a single ``{"observations", "inventory"}`` dict batched over agents, NOT the
+  per-agent tuple ``storm_2p`` uses, so :class:`StormAdapter` does not apply. Use
+  ``storm_2p``.
 
 Two thin wrappers live here (moved out of the scripts):
 
@@ -253,7 +259,7 @@ class HanabiWrapper(AvailActionsWrapper):
 
 
 class StormAdapter(MultiAgentEnv):
-    """Adapt JaxMARL STORM's tuple API to the shared per-agent IQL contract.
+    """Adapt JaxMARL ``storm_2p``'s tuple API to the shared per-agent IQL contract.
 
     JaxMARL 0.0.2 represents each observation as ``(view, inventory)`` inside a
     tuple indexed by integer agent id. Actions and rewards are tuples too, while the
@@ -261,6 +267,11 @@ class StormAdapter(MultiAgentEnv):
     float observations and per-agent dictionaries for all of these values. This
     adapter performs exactly those structural conversions and delegates dynamics to
     the original environment.
+
+    Only the 2-player variant is adaptable: ``InTheGrid_2p`` hardcodes a red/blue
+    pair, so its obs/reward tuples are always length 2 regardless of the
+    ``num_agents`` it was constructed with. The N-player ``InTheGrid`` uses a
+    different (batched-dict) API entirely -- see the module docstring.
     """
 
     def __init__(self, env: MultiAgentEnv) -> None:
@@ -303,11 +314,11 @@ class StormAdapter(MultiAgentEnv):
         done_dict["__all__"] = done
         return self._observations(observations), state, reward_dict, done_dict, info
 
-    def observation_space(self, agent: int = 0):
+    def observation_space(self, agent: str | None = None):
         del agent
         return self._obs_space
 
-    def action_space(self, agent: int = 0):
+    def action_space(self, agent: str | None = None):
         del agent
         return self._env.action_space()
 
@@ -315,7 +326,13 @@ class StormAdapter(MultiAgentEnv):
         return self._observations(self._env.get_obs(state))
 
     def __getattr__(self, name):
-        return getattr(self.__dict__["_env"], name)
+        # ``__getattr__`` runs before ``__init__`` populates ``_env`` (pickle and
+        # ``copy`` probe dunders on a bare instance), so a missing ``_env`` must
+        # surface as AttributeError -- a KeyError here would escape ``hasattr``.
+        env = self.__dict__.get("_env")
+        if env is None:
+            raise AttributeError(name)
+        return getattr(env, name)
 
 
 # --------------------------------------------------------------------------- spec
@@ -409,14 +426,38 @@ def _build_switch_riddle(**kwargs: Any) -> MultiAgentEnv:
     return jaxmarl.make("switch_riddle", **kwargs)
 
 
-def _build_storm(**kwargs: Any) -> MultiAgentEnv:
-    # Symmetric common-payoff coordination game: mutual cooperation is optimal,
-    # unilateral cooperation is costly, and mutual defection is a lower equilibrium.
-    # JaxMARL expects one 2x2 matrix per player.
+def _build_storm_2p(**kwargs: Any) -> MultiAgentEnv:
+    # Symmetric common-payoff *coordination* (Stag-Hunt-shaped) game, NOT the
+    # library's general-sum Prisoner's Dilemma. With row = own mixture and column =
+    # the other's: (C,C)=4 is the optimum, (D,D)=2 is a second, worse equilibrium,
+    # and unilateral cooperation pays 0 -- worse than mutual defection, so
+    # coordination is what has to be learned. JaxMARL wants one 2x2 matrix per
+    # player; passing the same *symmetric* matrix twice makes the payoff common
+    # (``r1 == r2`` for every joint action), which is what the cooperative
+    # learning screen assumes.
     common_payoff = jnp.asarray([[4, 0], [0, 2]], dtype=jnp.int32)
     payoff_matrix = kwargs.pop("payoff_matrix", jnp.stack([common_payoff, common_payoff]))
+    num_agents = kwargs.pop("num_agents", 2)
+    if num_agents != 2:
+        # InTheGrid_2p accepts num_agents but ignores it -- its obs/reward tuples are
+        # always the red/blue pair -- so anything else would fail deep inside the
+        # adapter with an IndexError instead of here.
+        raise NotImplementedError(
+            f"'storm_2p' is a strictly 2-player env (got num_agents={num_agents}); "
+            "JaxMARL's N-player 'storm' uses a different, unadapted obs API. See "
+            "conformal_marl/envs/registry.py."
+        )
     base = jaxmarl.make("storm_2p", payoff_matrix=payoff_matrix, **kwargs)
     return StormAdapter(base)
+
+
+def _build_storm(*_: Any, **__: Any) -> MultiAgentEnv:
+    raise NotImplementedError(
+        "'storm' is JaxMARL's N-player InTheGrid, which returns obs as a single "
+        "{'observations','inventory'} dict batched over agents rather than the "
+        "per-agent tuple StormAdapter adapts. Use 'storm_2p' for the adapted "
+        "cooperative 2-player game. See conformal_marl/envs/registry.py."
+    )
 
 
 # name -> (builder, partially_observable). ``masks_actions`` / ``obs_dim`` are derived
@@ -439,16 +480,16 @@ _BUILDERS: dict[str, tuple[Callable[..., MultiAgentEnv], bool]] = {
     "overcooked": (_build_overcooked, True),
     "hanabi": (_build_hanabi, True),
     "switch_riddle": (_build_switch_riddle, True),
-    "storm": (_build_storm, True),
-    "storm_2p": (_build_storm, True),
+    "storm_2p": (_build_storm_2p, True),
     # Known-incompatible with the per-agent IQL loop (instantiable only -> raise a clear
     # NotImplementedError pointing at the reason; never fail deep inside make_train).
     "coin_game": (_build_coin_game, True),
+    "storm": (_build_storm, True),
 }
 
 # Names whose builders raise NotImplementedError (non-per-agent obs/reward APIs): the IQL
 # loop cannot consume them without a bespoke adapter, deferred from M7.
-INCOMPATIBLE_ENVS: tuple[str, ...] = ("coin_game",)
+INCOMPATIBLE_ENVS: tuple[str, ...] = ("coin_game", "storm")
 
 # Convenience: the subset the IQL loop can actually instantiate *and run*.
 IN_SCOPE_ENVS: tuple[str, ...] = tuple(
@@ -496,7 +537,7 @@ def _default_config(spec_name: str, partially_observable: bool, num_actions: int
             buffer_size=50_000, target_update_interval=100, epsilon_anneal_time=30_000,
             eval_episodes=64, eval_steps=12, net_type=net_type,
         )
-    if spec_name in {"storm", "storm_2p"}:
+    if spec_name == "storm_2p":
         return IQLConfig(
             total_timesteps=250_000, num_envs=16, num_steps=32, num_grad_steps=8,
             learning_starts=512, hidden_dim=64, lr=5e-4, gamma=0.99, batch_size=128,
@@ -528,7 +569,8 @@ def make_env(name: str, config_overrides: dict | None = None, **env_kwargs: Any)
         A factory key (see :func:`available_envs`): the custom ``"simu"``, an MPE id
         (``"MPE_simple_spread_v3"``), ``"SMAX"`` / ``"HeuristicEnemySMAX"`` /
         ``"LearnedPolicyEnemySMAX"``, ``"overcooked"``, ``"coin_game"``, ``"hanabi"``,
-        ``"switch_riddle"``, or the adapted cooperative ``"storm"`` / ``"storm_2p"``.
+        ``"switch_riddle"``, or the adapted cooperative ``"storm_2p"``. (``"storm"``
+        -- the N-player variant -- raises; see the module docstring.)
     config_overrides:
         Optional mapping of :class:`IQLConfig` field -> value, applied to the env's
         default config (e.g. ``{"total_timesteps": 1000, "num_envs": 2}`` to make a CI

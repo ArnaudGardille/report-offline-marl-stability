@@ -14,8 +14,9 @@ shape-checked* in CI; their short ``make_train`` run is marked ``slow`` (opt in 
 ``pytest -m slow``) so the default suite stays snappy -- the milestone explicitly allows
 slow-skipping the heavy ones as long as they still instantiate.
 
-The known-incompatible env (Coin-Game: non-per-agent reward/done API) is
-asserted to raise a clear ``NotImplementedError`` rather than fail deep inside training.
+The known-incompatible envs (Coin-Game and the N-player STORM: non-per-agent
+reward/obs APIs) are asserted to raise a clear ``NotImplementedError`` rather than fail
+deep inside training.
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ import numpy as np
 import pytest
 
 import jax
+import jax.numpy as jnp
 
 from conformal_marl.envs.registry import (
     INCOMPATIBLE_ENVS,
@@ -45,7 +47,7 @@ LIGHT_ENVS = [
     "overcooked",
     "hanabi",
     "switch_riddle",
-    "storm",
+    "storm_2p",
 ]
 SMAX_ENVS = ["SMAX", "HeuristicEnemySMAX"]
 
@@ -140,14 +142,14 @@ def test_available_envs_lists_targets():
     envs = available_envs()
     for expected in [
         "simu", "MPE_simple_spread_v3", "SMAX", "overcooked", "hanabi",
-        "switch_riddle", "storm",
+        "switch_riddle", "storm_2p",
     ]:
         assert expected in envs
 
 
-def test_storm_adapter_exposes_cooperative_per_agent_contract():
-    """STORM tuples become flat per-agent dicts with shared cooperative rewards."""
-    env, spec = make_env("storm", num_inner_steps=8)
+def test_storm_adapter_exposes_per_agent_contract():
+    """STORM's tuples become flat per-agent dicts keyed by string agent name."""
+    env, spec = make_env("storm_2p", num_inner_steps=8)
     assert isinstance(env, StormAdapter)
     obs, state = env.reset(jax.random.PRNGKey(0))
     assert set(obs) == set(env.agents)
@@ -160,8 +162,54 @@ def test_storm_adapter_exposes_cooperative_per_agent_contract():
     )
     assert set(next_obs) == set(env.agents)
     assert set(rewards) == set(env.agents)
-    assert rewards[env.agents[0]] == rewards[env.agents[1]]
     assert set(dones) == {*env.agents, "__all__"}
+    # String keys are load-bearing: JaxMARL's auto-reset tree-flattens the done dict,
+    # and STORM's native int ids cannot be sorted alongside the "__all__" key.
+    assert all(isinstance(agent, str) for agent in env.agents)
+
+
+def test_storm_payoff_is_symmetric_and_common():
+    """The factory's payoff matrix really does make the game common-payoff.
+
+    Stepping from ``reset`` cannot show this: both inventories are empty, so STORM
+    masks the reward to 0.0 for *any* payoff matrix (including the general-sum
+    Prisoner's Dilemma default) and an equality assertion there is vacuous. Score
+    non-empty inventories directly instead.
+    """
+    env, _ = make_env("storm_2p", num_inner_steps=8)
+    _, state = env.reset(jax.random.PRNGKey(0))
+
+    for red, blue in [((2, 0), (2, 0)), ((0, 2), (0, 2)), ((2, 0), (0, 2))]:
+        scored = state.replace(
+            red_inventory=jnp.asarray(red, dtype=jnp.float32),
+            blue_inventory=jnp.asarray(blue, dtype=jnp.float32),
+        )
+        r_red, r_blue = env.get_reward(scored)
+        assert float(r_red) == pytest.approx(float(r_blue)), (red, blue)
+
+    def payoff(red, blue) -> float:
+        scored = state.replace(
+            red_inventory=jnp.asarray(red, dtype=jnp.float32),
+            blue_inventory=jnp.asarray(blue, dtype=jnp.float32),
+        )
+        return float(env.get_reward(scored)[0])
+
+    # Stag-Hunt shape: coordinating on the first coin is optimal, the second is a
+    # worse equilibrium, and miscoordination pays less than either.
+    assert payoff((1, 0), (1, 0)) == pytest.approx(4.0)
+    assert payoff((0, 1), (0, 1)) == pytest.approx(2.0)
+    assert payoff((1, 0), (0, 1)) == pytest.approx(0.0)
+
+
+def test_nplayer_storm_and_wrong_agent_count_raise_at_the_factory():
+    """Neither miswiring may fail deep inside the adapter or make_train."""
+    # JaxMARL's N-player "storm" is a different (batched-dict) obs API entirely.
+    with pytest.raises(NotImplementedError, match="storm_2p"):
+        make_env("storm")
+    # InTheGrid_2p accepts num_agents but always yields the red/blue pair, so
+    # anything else used to surface as a bare IndexError inside _observations.
+    with pytest.raises(NotImplementedError, match="2-player"):
+        make_env("storm_2p", num_agents=3)
 
 
 def test_config_overrides_applied():

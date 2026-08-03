@@ -6,7 +6,11 @@ import argparse
 import json
 from pathlib import Path
 
-from conformal_marl.autoresearch.candidate import estimate_operator, sample_replay  # noqa: F401
+# Importing the module runs its ``@register_sampler`` decorator, which is how the
+# learning tier resolves ``"autoresearch_candidate"`` by name. Keep this import even
+# if ``estimate_operator`` stops being used here -- dropping it would leave the
+# learning tier unable to find the candidate's sampler.
+from conformal_marl.autoresearch.candidate import estimate_operator
 from conformal_marl.autoresearch.frozen.learning_benchmark import run_learning_benchmark
 from conformal_marl.autoresearch.frozen.mechanism_benchmark import (
     MechanismSweepConfig,
@@ -14,13 +18,16 @@ from conformal_marl.autoresearch.frozen.mechanism_benchmark import (
 )
 from conformal_marl.autoresearch.frozen.operator_benchmark import run_operator_benchmark
 
+DEFAULT_NUM_SEEDS = 8
+DEFAULT_TRIALS = 128
+
 
 def evaluate_candidate(
     *,
     tier: str,
     seed: int,
     trials: int,
-    num_seeds: int = 8,
+    num_seeds: int = DEFAULT_NUM_SEEDS,
     mechanism_config: dict | None = None,
 ) -> dict:
     if tier == "operator":
@@ -45,8 +52,8 @@ def main() -> None:
         "--tier", choices=("operator", "mechanism", "learning"), default="operator"
     )
     parser.add_argument("--seed", type=int, default=20260712)
-    parser.add_argument("--trials", type=int, default=128)
-    parser.add_argument("--num-seeds", type=int, default=8)
+    parser.add_argument("--trials", type=int, default=DEFAULT_TRIALS)
+    parser.add_argument("--num-seeds", type=int, default=DEFAULT_NUM_SEEDS)
     parser.add_argument("--mechanism-config", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()

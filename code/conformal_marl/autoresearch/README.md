@@ -38,9 +38,22 @@ uv run python -m conformal_marl.autoresearch.evaluate \
   --output outputs/autoresearch_learning.json
 ```
 
-Its score is a lower confidence bound on paired AUC/final-return improvement over
-uniform replay. Simultaneous-Attack is a support-preservation gate, not a target to game:
-a candidate with a material regression there is rejected even if it improves STORM.
+Its score is a one-sided Student-t lower confidence bound on paired improvement over
+uniform replay, weighting mean training return 0.6 and final greedy return 0.4.
+Simultaneous-Attack is a support-preservation gate, not a target to game: the candidate
+must pass a non-inferiority test there, and failing it sets `primary_score` to `-inf` --
+a hard rejection, so a gate-failing candidate can never outrank a gate-passing one under
+`max(primary_score)` ranking. `raw_score` keeps the uncapped value for diagnosis, and
+each scenario reports a `fingerprint` tying the score to the exact frozen budget that
+produced it.
+
+> **Known limitation.** At the pinned STORM budget the reward is very sparse -- a
+> measured 2-seed baseline run produced non-zero greedy return at only 8 of 128 eval
+> points, with a maximum of 0.5 against a `return_scale` of 16.0. The scored deltas
+> therefore sit around 1e-3 while `support_tolerance` is 0.05, so the screen currently
+> has little power to separate candidates. Recalibrating `return_scale` and raising the
+> STORM budget (validated by a power check against a deliberately degraded sampler)
+> is open work; the tier is safe to run but should not yet be read as a strong signal.
 
 ## AI Scientist v2 orchestration
 
