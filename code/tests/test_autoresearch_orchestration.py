@@ -66,7 +66,7 @@ def test_build_search_config_uses_absolute_paths_and_staged_gate(tmp_path: Path)
         learning_seeds=3,
         validation_trials=16,
         validation_seeds=4,
-        finalist_count=2,
+        finalist_count=1,
     )
     assert Path(config["repository"]).is_absolute()
     assert Path(config["task_context_file"]).is_absolute()
@@ -82,7 +82,7 @@ def test_build_search_config_uses_absolute_paths_and_staged_gate(tmp_path: Path)
     assert learning_command[seed_option + 1] == "3"
     assert config["campaign"]["initial_capacity"] == 2
     assert config["campaign"]["max_nodes"] == 4
-    assert config["campaign"]["finalist_count"] == 2
+    assert config["campaign"]["finalist_count"] == 1
     assert [stage["name"] for stage in config["final_stages"]] == [
         "heldout_mechanism", "heldout_learning"
     ]
@@ -104,4 +104,20 @@ def test_build_search_config_rejects_unknown_ref(tmp_path: Path):
             output_dir=tmp_path / "results",
             task_context_file=context,
             shared_python=shared_python,
+        )
+
+
+def test_build_search_config_rejects_heldout_model_selection(tmp_path: Path):
+    repo, orchestrator, context = _init_fixture(tmp_path)
+    shared_python = tmp_path / "venv-python"
+    shared_python.write_text("")
+    with pytest.raises(ValueError, match="invalid search or evaluation budget"):
+        build_search_config(
+            repository=repo,
+            orchestrator=orchestrator,
+            base_ref="HEAD",
+            output_dir=tmp_path / "results",
+            task_context_file=context,
+            shared_python=shared_python,
+            finalist_count=2,
         )
