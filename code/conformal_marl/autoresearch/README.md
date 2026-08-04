@@ -109,5 +109,14 @@ counts and rejects unknown fields or sweeps above 128 cells. Held-out mechanism
 validation ignores the designed diagnostic.
 
 Learning promotion requires a positive paired screening bound on the scored STORM task
-and no Simultaneous-Attack support regression. Merely completing training is not treated
-as evidence of improved sample efficiency.
+and no Simultaneous-Attack support regression. Promotion scores against uniform replay;
+`--reference-control` adds a stronger comparison (exact-ratio weighting) on the same
+paired seeds, reported on the confirmatory stage and never gating. It is reported
+rather than enforced deliberately: a gate no known method clears prunes the whole
+search and produces an uninterpretable null instead of a finding, so promoting this
+comparison to a gate should follow evidence that something passes it. Note also that
+with `large_batch_size` unset the buffer draws exactly `batch_size` items, so conformal
+selection is inert and that control measures exact-ratio *weighting*, not the
+support-floored recovering configuration its sampler is named for.
+
+Merely completing training is not treated as evidence of improved sample efficiency.

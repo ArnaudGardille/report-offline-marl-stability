@@ -20,7 +20,7 @@ from scipy import stats
 
 from conformal_marl.envs.registry import make_env
 from conformal_marl.iql import make_train
-from conformal_marl.samplers import assert_baseline_integrity
+from conformal_marl.samplers import assert_baseline_integrity, get_sampler
 
 # Score assigned to a candidate that regresses a support gate. Sorting by
 # ``primary_score`` alone must rank such a candidate below *every* gate-passing one,
@@ -240,6 +240,7 @@ def run_learning_benchmark(
     scenarios: Iterable[LearningScenario] = DEFAULT_LEARNING_SCENARIOS,
     confidence: float = 0.975,
     support_tolerance: float = 0.05,
+    reference_controls: tuple[str, ...] = (),
 ) -> dict:
     """Compare candidate and uniform replay on identical random seeds.
 
@@ -270,6 +271,24 @@ def run_learning_benchmark(
     gate-failing candidate can never outrank a gate-passing one under plain
     ``max(primary_score)`` ranking. ``raw_score`` keeps the uncapped value for
     diagnosis.
+
+    ``reference_controls`` names additional samplers to measure the candidate against
+    on the *same* paired seeds. They are **reported and never gate**: ``primary_score``
+    is always the bound against uniform replay. "Beat uniform" is a bar noise can
+    clear, so a stronger reference is worth reporting -- but a gate that no known
+    method passes prunes the entire search and yields an uninterpretable null, so
+    promoting one of these to a gate should follow evidence that something clears it,
+    not precede it.
+
+    A caveat that must not be lost when reading those numbers: with ``large_batch_size``
+    unset the buffer draws exactly ``batch_size`` items, so conformal *selection* is
+    inert (Gumbel-top-k over ``L == B`` is a permutation) and ``support_floor`` defaults
+    to ``0.0``. A control named for the support-floored recovering configuration
+    therefore reduces, in this tier, to exact-ratio loss weights over a uniform draw.
+    Raising ``L`` is not a local fix: :func:`~conformal_marl.samplers.uniform_sampler`
+    returns the entire drawn batch, so it would train the control on ``L`` items while
+    a selecting arm trains on ``B``, breaking the equal-compute pairing. Report what
+    this measures -- exact-ratio weighting -- not what the sampler is named.
     """
 
     if num_seeds < 2:
@@ -279,6 +298,14 @@ def run_learning_benchmark(
         raise ValueError("at least one learning scenario is required")
     for scenario in scenario_list:
         scenario.validate()
+
+    # Resolve every control name up front. Deferring this means a typo surfaces as a
+    # KeyError inside a jit trace *after* the candidate's full training run has been
+    # paid for.
+    controls = tuple(dict.fromkeys(reference_controls))
+    for name in controls:
+        get_sampler(name)
+    assert_baseline_integrity(*(("uniform",) + controls))
 
     root = np.random.SeedSequence(seed)
     seed_values = root.generate_state(num_seeds, dtype=np.uint32)
@@ -291,20 +318,40 @@ def run_learning_benchmark(
         # Re-checked per scenario rather than once at import: ``make_train`` resolves
         # the sampler by name at call time, and the candidate's own arm has already
         # executed by the second iteration.
-        assert_baseline_integrity("uniform")
+        assert_baseline_integrity(*(("uniform",) + controls))
         baseline = _run_sampler(scenario, "uniform", seed_values)
         candidate = _run_sampler(scenario, candidate_sampler, seed_values)
-        baseline_curve = np.asarray(baseline["returns"], dtype=np.float64)
         candidate_curve = np.asarray(candidate["returns"], dtype=np.float64)
-        baseline_final = np.asarray(baseline["end_greedy_return"], dtype=np.float64)
         candidate_final = np.asarray(candidate["end_greedy_return"], dtype=np.float64)
-
-        baseline_auc = baseline_curve.mean(axis=1) / scenario.return_scale
         candidate_auc = candidate_curve.mean(axis=1) / scenario.return_scale
-        final_delta = (candidate_final - baseline_final) / scenario.return_scale
-        paired_delta = 0.6 * (candidate_auc - baseline_auc) + 0.4 * final_delta
-        mean_delta = float(paired_delta.mean())
-        lower_bound = mean_delta - critical_value * _sem(paired_delta)
+
+        def _paired(control: dict) -> tuple[np.ndarray, float, float]:
+            """Paired candidate-minus-control utility on the shared seeds."""
+            control_curve = np.asarray(control["returns"], dtype=np.float64)
+            control_final = np.asarray(control["end_greedy_return"], dtype=np.float64)
+            control_auc = control_curve.mean(axis=1) / scenario.return_scale
+            final_delta = (candidate_final - control_final) / scenario.return_scale
+            delta = 0.6 * (candidate_auc - control_auc) + 0.4 * final_delta
+            mean = float(delta.mean())
+            return delta, mean, mean - critical_value * _sem(delta)
+
+        baseline_final = np.asarray(baseline["end_greedy_return"], dtype=np.float64)
+        baseline_auc = (
+            np.asarray(baseline["returns"], dtype=np.float64).mean(axis=1)
+            / scenario.return_scale
+        )
+        paired_delta, mean_delta, lower_bound = _paired(baseline)
+
+        # Reported, never gating -- see the docstring. Reuses ``seed_values``, so the
+        # reference arms are paired with the candidate exactly as uniform is.
+        reference_bounds: dict[str, dict[str, float]] = {}
+        for name in controls:
+            reference = _run_sampler(scenario, name, seed_values)
+            _, reference_mean, reference_bound = _paired(reference)
+            reference_bounds[name] = {
+                "mean_utility_delta": reference_mean,
+                "lower_screening_bound": reference_bound,
+            }
 
         if scenario.support_gate:
             # Simultaneous-Attack is a support-preservation gate, not a scored
@@ -323,7 +370,9 @@ def run_learning_benchmark(
             "paired_utility_delta": paired_delta.tolist(),
             "mean_utility_delta": mean_delta,
             "utility_sem": _sem(paired_delta),
+            # Named for its control: this is the bound the score and the gate use.
             "lower_screening_bound": lower_bound,
+            "reference_controls": reference_bounds,
             "baseline_final_return": baseline_final.tolist(),
             "candidate_final_return": candidate_final.tolist(),
             "baseline_auc": baseline_auc.tolist(),
@@ -332,7 +381,13 @@ def run_learning_benchmark(
 
     if not lower_bounds:
         raise ValueError("at least one non-gate (scored) scenario is required")
-    raw_score = float(np.mean(lower_bounds))
+    # Worst scored scenario, not the mean of them. Promotion is the claim "improves on
+    # every scored task", i.e. an intersection-union test, and ``mean(bounds) > t``
+    # does not imply ``min(bounds) > t``: averaging lets a large win on one task pay
+    # for a regression on another. Identical to the mean while exactly one scenario is
+    # scored, which is why the distinction was invisible -- and why it has to be fixed
+    # before a second scored scenario is added rather than after.
+    raw_score = float(np.min(lower_bounds))
     primary_score = REJECTED_SCORE if gate_failures else raw_score
     return {
         "status": "ok" if not gate_failures else "support_regression",
@@ -344,6 +399,8 @@ def run_learning_benchmark(
         "confidence": confidence,
         "critical_value": critical_value,
         "support_tolerance": support_tolerance,
+        "scoring_control": "uniform",
+        "reference_controls": list(controls),
         "paired_seeds": seed_values.astype(np.uint64).tolist(),
         "support_gate_failures": gate_failures,
         "scenarios": results,
