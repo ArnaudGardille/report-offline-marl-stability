@@ -51,13 +51,38 @@ a hard rejection, so a gate-failing candidate can never outrank a gate-passing o
 each scenario reports a `fingerprint` tying the score to the exact frozen budget that
 produced it.
 
-> **Known limitation.** At the pinned STORM budget the reward is very sparse -- a
-> measured 2-seed baseline run produced non-zero greedy return at only 8 of 128 eval
-> points, with a maximum of 0.5 against a `return_scale` of 16.0. The scored deltas
-> therefore sit around 1e-3 while `support_tolerance` is 0.05, so the screen currently
-> has little power to separate candidates. Recalibrating `return_scale` and raising the
-> STORM budget (validated by a power check against a deliberately degraded sampler)
-> is open work; the tier is safe to run but should not yet be read as a strong signal.
+### Screen power
+
+The budget this tier runs at is not a guess. `scripts/screen_power_check.py` measures
+whether the screen can separate deliberately degraded replay from uniform replay, using
+two probe samplers registered outside the frozen package: a distributionally null one
+(uniform on an independently folded key), which fixes the seed-noise floor, and a family
+that collapses each training batch onto `k` distinct transitions, which degrades replay
+monotonically as `k` falls. A screen that cannot see the degraded probes cannot be
+trusted when it reports an improvement.
+
+The previously pinned budget (16,384 steps, `return_scale` 16.0) failed that check
+outright: 4% of evaluation points were non-zero, and collapsing every batch onto a
+*single* repeated transition moved the paired delta by 0.7x the noise floor, with the
+probe ranking coming out anti-correlated with true degradation. At the current
+65,536-step, `return_scale` 2.0, 32-eval-episode setting the probes rank monotonically
+and the worst one moves the delta by ~3.6x the noise floor. `scripts/screen_budget_sweep.py`
+records the budget/signal curve behind that choice.
+
+Re-run the check after any change to the scored scenario:
+
+```bash
+uv run python scripts/screen_power_check.py --num-seeds 8
+```
+
+> **Remaining limitation.** Power is adequate, not generous: at 8 seeds the minimum
+> detectable effect is roughly 0.04 in scaled utility, so only a fairly large real
+> improvement is promotable, and the most degraded probe sits just at the edge of
+> resolvability. The 32-seed held-out stage is correspondingly better powered than the
+> search stage. Separately, `support_tolerance` (0.05) is still ~6x looser than the
+> worst degradation the gate scenario actually exhibits (-0.008), so the support gate
+> would not fire even on the most degraded probe; the gate scenario is deterministic
+> across seeds (SEM exactly 0), so tightening it is possible but has not been done.
 
 ## AI Scientist v2 orchestration
 

@@ -106,12 +106,30 @@ DEFAULT_LEARNING_SCENARIOS = (
         return_scale=4.0,
         support_gate=True,
     ),
+    # Budget and return_scale recalibrated against a measured power check (see
+    # ``scripts/screen_power_check.py`` and ``scripts/screen_budget_sweep.py``); the
+    # previous 16_384/16.0 pinning is what PR #34 flagged as under-powered.
+    #
+    # At 16_384 steps only 4% of evaluation points were non-zero, the achievable
+    # scaled return was 0.039, and the screen could not resolve *any* degraded
+    # sampler: collapsing every training batch onto a single repeated transition
+    # moved the paired delta by 0.7x the seed-noise SEM, and the score ranking of the
+    # probe family came out anti-correlated with their true degradation.
+    #
+    # At 65_536 steps with 32 evaluation episodes the same probes rank monotonically
+    # in degradation and the worst probe moves the delta by 3.6x the noise floor.
+    # The step increase is close to free in wall-clock (JIT compilation dominates at
+    # this scale: 38s -> 48s for four seeds), which is why it is preferred over
+    # buying power with more seeds. return_scale tracks the return actually reached
+    # at this budget (observed curve max 2.40) instead of the converged-play 16.0,
+    # which had been shrinking every effect size by ~25x and made minimum_score and
+    # support_tolerance impossible to interpret.
     LearningScenario(
         name="storm_cooperative",
         env_name="storm_2p",
         env_kwargs={"num_inner_steps": 48},
         config_overrides={
-            "total_timesteps": 16_384,
+            "total_timesteps": 65_536,
             "num_envs": 8,
             "num_steps": 32,
             "num_grad_steps": 4,
@@ -120,14 +138,14 @@ DEFAULT_LEARNING_SCENARIOS = (
             "batch_size": 64,
             "large_batch_size": 256,
             "support_floor": 0.05,
-            "buffer_size": 16_384,
+            "buffer_size": 65_536,
             "cal_size": 64,
             "epsilon_anneal_time": 10_000,
-            "eval_episodes": 8,
+            "eval_episodes": 32,
             "eval_steps": 48,
             "eval_during_training": True,
         },
-        return_scale=16.0,
+        return_scale=2.0,
     ),
 )
 
@@ -147,10 +165,10 @@ DEFAULT_LEARNING_SCENARIOS = (
 #   uniform return 0.982 at N=3 and 0.975 at N=4. An earlier revision of this scenario
 #   used ``5.0``, which made the confirmatory support gate 25% more permissive in raw
 #   return than the screening gate.
-# * STORM scales with the horizon, because its return is a sum over inner steps:
-#   ``16.0 * 64 / 48``. Measured returns grow by rather more than the horizon ratio
-#   (learning progress differs too), so this equalizes the mechanical part of the
-#   change only; it is not a full recalibration of the two stages onto one scale.
+# * STORM uses the recalibrated search budget and scales its return divisor with the
+#   horizon, because return is a sum over inner steps: ``2.0 * 64 / 48``. This
+#   equalizes the mechanical part of the task shift; it is not an empirical
+#   calibration of the held-out task, whose result remains confirmatory.
 HELDOUT_LEARNING_SCENARIOS = (
     LearningScenario(
         name="simultaneous_attack_support_4_agents",
@@ -183,7 +201,7 @@ HELDOUT_LEARNING_SCENARIOS = (
         env_name="storm_2p",
         env_kwargs={"num_inner_steps": 64},
         config_overrides={
-            "total_timesteps": 20_480,
+            "total_timesteps": 65_536,
             "num_envs": 8,
             "num_steps": 32,
             "num_grad_steps": 4,
@@ -192,14 +210,14 @@ HELDOUT_LEARNING_SCENARIOS = (
             "batch_size": 64,
             "large_batch_size": 256,
             "support_floor": 0.05,
-            "buffer_size": 20_480,
+            "buffer_size": 65_536,
             "cal_size": 64,
-            "epsilon_anneal_time": 12_000,
-            "eval_episodes": 8,
+            "epsilon_anneal_time": 10_000,
+            "eval_episodes": 32,
             "eval_steps": 64,
             "eval_during_training": True,
         },
-        return_scale=16.0 * 64 / 48,
+        return_scale=2.0 * 64 / 48,
     ),
 )
 
