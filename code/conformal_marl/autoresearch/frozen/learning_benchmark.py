@@ -94,6 +94,8 @@ DEFAULT_LEARNING_SCENARIOS = (
             "learning_starts": 128,
             "hidden_dim": 32,
             "batch_size": 64,
+            "large_batch_size": 256,
+            "support_floor": 0.05,
             "buffer_size": 8_192,
             "cal_size": 32,
             "epsilon_anneal_time": 4_096,
@@ -116,6 +118,8 @@ DEFAULT_LEARNING_SCENARIOS = (
             "learning_starts": 256,
             "hidden_dim": 64,
             "batch_size": 64,
+            "large_batch_size": 256,
+            "support_floor": 0.05,
             "buffer_size": 16_384,
             "cal_size": 64,
             "epsilon_anneal_time": 10_000,
@@ -160,6 +164,8 @@ HELDOUT_LEARNING_SCENARIOS = (
             "learning_starts": 128,
             "hidden_dim": 32,
             "batch_size": 64,
+            "large_batch_size": 256,
+            "support_floor": 0.05,
             "buffer_size": 8_192,
             "cal_size": 32,
             "epsilon_anneal_time": 4_096,
@@ -184,6 +190,8 @@ HELDOUT_LEARNING_SCENARIOS = (
             "learning_starts": 256,
             "hidden_dim": 64,
             "batch_size": 64,
+            "large_batch_size": 256,
+            "support_floor": 0.05,
             "buffer_size": 20_480,
             "cal_size": 64,
             "epsilon_anneal_time": 12_000,
@@ -280,15 +288,13 @@ def run_learning_benchmark(
     promoting one of these to a gate should follow evidence that something clears it,
     not precede it.
 
-    A caveat that must not be lost when reading those numbers: with ``large_batch_size``
-    unset the buffer draws exactly ``batch_size`` items, so conformal *selection* is
-    inert (Gumbel-top-k over ``L == B`` is a permutation) and ``support_floor`` defaults
-    to ``0.0``. A control named for the support-floored recovering configuration
-    therefore reduces, in this tier, to exact-ratio loss weights over a uniform draw.
-    Raising ``L`` is not a local fix: :func:`~conformal_marl.samplers.uniform_sampler`
-    returns the entire drawn batch, so it would train the control on ``L`` items while
-    a selecting arm trains on ``B``, breaking the equal-compute pairing. Report what
-    this measures -- exact-ratio weighting -- not what the sampler is named.
+    Every scenario sets ``large_batch_size > batch_size`` and a non-zero
+    ``support_floor``, so the selection samplers are actually exercised: they draw
+    ``L``, score it, and keep ``B``. That matters for what the controls *mean* --
+    with ``L == B``, Gumbel-top-k is a permutation and ``support_floor`` defaults to
+    ``0.0``, so a control named for the support-floored recovering configuration would
+    silently degrade to exact-ratio loss weights over a uniform draw, and the tier
+    could not express the paper's own mechanism at all.
     """
 
     if num_seeds < 2:

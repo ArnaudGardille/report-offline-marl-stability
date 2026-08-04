@@ -129,14 +129,38 @@ def uniform_sampler(
 ) -> tuple[Transition, chex.Array, dict]:
     """Plain uniform sampling: flashbax uniform draw, unit weights.
 
-    Draws ``buffer.sample_batch_size`` items (here configured to equal the trained
-    batch size, so no subsampling happens) and weights every sample by 1, leaving
-    the TD loss unchanged. ``ctx`` is unused but part of the contract so M3's
-    samplers are signature-compatible.
+    Draws the buffer's ``sample_batch_size`` items ``L`` and, when ``L > batch_size``,
+    subsamples uniformly without replacement down to the trained size ``B``, weighting
+    every kept sample by 1 so the TD loss is unchanged.
+
+    That subsample is what makes ``large_batch_size`` usable as an experimental knob.
+    The selection samplers below follow the LaBER recipe -- draw ``L``, keep ``B`` --
+    so if this one instead trained on all ``L`` items, raising ``L`` would hand the
+    uniform control ``L/B`` times more gradient data than every selecting arm and
+    quietly turn a replay-mechanism comparison into a batch-size comparison. Equal
+    trained-batch size is what makes the arms comparable.
+
+    When ``L == B`` the draw is returned untouched, on the original RNG stream, so
+    existing single-draw results are bit-identical.
     """
-    del ctx, batch_size
+    del ctx
     sample = buffer.sample(buffer_state, rng)
     batch: Transition = sample.experience
+    drawn = batch.reward.shape[0]  # static under jit
+    if drawn > batch_size:
+        # Local import to avoid a module-load cycle (conformal imports replay only).
+        from conformal_marl.conformal import gumbel_top_k, tree_index
+
+        # Constant log-weights: Gumbel-top-k over equal weights is exactly a uniform
+        # subset without replacement, and reuses the same tested selection path the
+        # conformal samplers use. ``fold_in`` rather than ``split`` so the draw above
+        # keeps consuming the caller's key unchanged.
+        idx_B = gumbel_top_k(
+            jnp.zeros((drawn,), dtype=jnp.float32),
+            batch_size,
+            jax.random.fold_in(rng, 1),
+        )
+        batch = tree_index(batch, idx_B)
     weights = jnp.ones((batch.reward.shape[0],), dtype=jnp.float32)
     return batch, weights, {}
 
