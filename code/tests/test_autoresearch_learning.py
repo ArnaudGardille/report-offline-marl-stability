@@ -458,3 +458,95 @@ def test_unknown_learning_profile_raises_instead_of_running_the_search_screen():
         evaluate.evaluate_candidate(
             tier="learning", seed=1, trials=2, num_seeds=2, learning_profile="held-out"
         )
+
+
+def test_reference_controls_are_reported_but_never_gate(monkeypatch):
+    """A stronger control informs; it must not prune the search.
+
+    'Beat uniform' is a bar noise can clear, so the exact-ratio comparison is worth
+    having -- but as a *gate* it would reject every currently known sampler, including
+    the shipped baseline, and a search that prunes everything yields an
+    uninterpretable null rather than a finding.
+    """
+    calls: list[str] = []
+
+    def fake_run(scenario, sampler_name, seeds):
+        calls.append(sampler_name)
+        # Candidate beats uniform, but loses badly to the reference control.
+        value = {"uniform": 0.0, "exact_ratio_floor": 5.0}.get(sampler_name, 1.0)
+        n = len(seeds)
+        return {
+            "returns": np.full((n, 3), value) + np.arange(n)[:, None] * 1e-3,
+            "end_greedy_return": np.full((n,), value),
+        }
+
+    monkeypatch.setattr(learning_benchmark, "_run_sampler", fake_run)
+    result = run_learning_benchmark(
+        "autoresearch_candidate",
+        seed=3,
+        num_seeds=4,
+        scenarios=(TINY_SCORED,),
+        reference_controls=("exact_ratio_floor",),
+    )
+
+    assert "exact_ratio_floor" in calls
+    scenario = result["scenarios"]["tiny_scored"]
+    reference = scenario["reference_controls"]["exact_ratio_floor"]
+
+    # Losing to the reference is recorded...
+    assert reference["mean_utility_delta"] < 0.0
+    # ...and does not touch the score, the status, or the gate.
+    assert result["status"] == "ok"
+    assert result["primary_score"] > 0.0
+    assert result["primary_score"] == pytest.approx(scenario["lower_screening_bound"])
+    assert result["scoring_control"] == "uniform"
+
+
+def test_reference_control_names_are_validated_before_any_training():
+    """A typo must not surface after the candidate's full training run is paid for."""
+    with pytest.raises(KeyError, match="unknown sampler"):
+        run_learning_benchmark(
+            "autoresearch_candidate",
+            seed=3,
+            num_seeds=2,
+            scenarios=(TINY_SCORED,),
+            reference_controls=("exact_ratio_flooor",),
+        )
+
+
+def test_score_is_the_worst_scored_scenario_not_their_mean(monkeypatch):
+    """Promotion claims improvement on *every* scored task.
+
+    ``mean(bounds) > t`` does not imply ``min(bounds) > t``: averaging lets a large win
+    on one scenario pay for a regression on another.
+    """
+    good = LearningScenario(
+        name="good", env_name="simu", env_kwargs={"num_agents": 3},
+        config_overrides=_tiny_config(), return_scale=1.0,
+    )
+    bad = LearningScenario(
+        name="bad", env_name="simu", env_kwargs={"num_agents": 3},
+        config_overrides=_tiny_config(), return_scale=1.0,
+    )
+
+    def fake_run(scenario, sampler_name, seeds):
+        n = len(seeds)
+        if sampler_name == "uniform":
+            value = 0.0
+        else:
+            value = 1.0 if scenario.name == "good" else -0.5
+        return {
+            "returns": np.full((n, 3), value),
+            "end_greedy_return": np.full((n,), value),
+        }
+
+    monkeypatch.setattr(learning_benchmark, "_run_sampler", fake_run)
+    result = run_learning_benchmark(
+        "autoresearch_candidate", seed=3, num_seeds=3, scenarios=(good, bad)
+    )
+    bounds = [
+        result["scenarios"][name]["lower_screening_bound"] for name in ("good", "bad")
+    ]
+    assert result["primary_score"] == pytest.approx(min(bounds))
+    # The mean would have promoted this candidate despite the regression.
+    assert float(np.mean(bounds)) > 0.0 > result["primary_score"]

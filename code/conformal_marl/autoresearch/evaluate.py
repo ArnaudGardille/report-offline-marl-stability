@@ -67,6 +67,7 @@ def evaluate_candidate(
     num_seeds: int = DEFAULT_NUM_SEEDS,
     mechanism_config: dict | None = None,
     learning_profile: str = "search",
+    reference_controls: tuple[str, ...] = (),
 ) -> dict:
     if tier == "operator":
         return run_operator_benchmark(estimate_operator, seed=seed, trials=trials)
@@ -90,6 +91,7 @@ def evaluate_candidate(
             seed=seed,
             num_seeds=num_seeds,
             scenarios=scenarios,
+            reference_controls=reference_controls,
         )
     raise ValueError(f"unknown evaluation tier {tier!r}")
 
@@ -106,6 +108,17 @@ def main() -> None:
     parser.add_argument(
         "--learning-profile", choices=sorted(LEARNING_PROFILES), default="search"
     )
+    parser.add_argument(
+        "--reference-control",
+        action="append",
+        default=[],
+        dest="reference_controls",
+        metavar="SAMPLER",
+        help=(
+            "Additional control to measure the candidate against on the same paired "
+            "seeds. Reported only -- it never gates promotion."
+        ),
+    )
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
 
@@ -121,6 +134,7 @@ def main() -> None:
         num_seeds=args.num_seeds,
         mechanism_config=mechanism_config,
         learning_profile=args.learning_profile,
+        reference_controls=tuple(args.reference_controls),
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, indent=2, sort_keys=True), encoding="utf-8")

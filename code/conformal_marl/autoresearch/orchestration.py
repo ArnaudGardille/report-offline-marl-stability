@@ -186,6 +186,11 @@ def build_search_config(
                     "{python}", "-m", "conformal_marl.autoresearch.evaluate",
                     "--tier", "learning", "--seed", "20260713",
                     "--learning-profile", "heldout",
+                    # Reported, never gating. Attached to the confirmatory stage only:
+                    # the controls are candidate-independent, so running them on every
+                    # search node would repeat the same trainings ~max_nodes times for
+                    # a number that cannot change a promotion decision.
+                    "--reference-control", "exact_ratio_floor",
                     "--num-seeds", str(validation_seeds), "--output", "{output}",
                 ],
                 "minimum_score": 0.001,
