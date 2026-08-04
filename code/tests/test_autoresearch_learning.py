@@ -119,7 +119,7 @@ def test_support_gate_improvement_cannot_lift_the_score(monkeypatch):
 
     # Gate is present and would have a large positive delta if it were scored...
     gate = result["scenarios"]["tiny_support"]
-    assert gate["lower_confidence_bound"] > 0.0
+    assert gate["lower_screening_bound"] > 0.0
     # ...but the score is taken from the scored scenario alone.
     assert result["raw_score"] == pytest.approx(0.0)
     assert result["primary_score"] == pytest.approx(0.0)
@@ -243,9 +243,9 @@ def test_interval_uses_a_t_quantile_not_the_normal_approximation(monkeypatch):
     scenario = result["scenarios"]["tiny_scored"]
     expected = -learning_benchmark._critical_value(4, 0.975) * scenario["utility_sem"]
     assert scenario["mean_utility_delta"] == pytest.approx(0.0)
-    assert scenario["lower_confidence_bound"] == pytest.approx(expected)
+    assert scenario["lower_screening_bound"] == pytest.approx(expected)
     # Strictly wider than the normal approximation it replaced.
-    assert scenario["lower_confidence_bound"] < -1.96 * scenario["utility_sem"]
+    assert scenario["lower_screening_bound"] < -1.96 * scenario["utility_sem"]
 
 
 def test_frozen_scenarios_reject_in_place_mutation():
@@ -341,3 +341,34 @@ def test_frozen_scorers_are_imported_before_candidate_code():
         "the frozen scorers must be imported before the generated candidate module, "
         "so the baseline snapshot is sealed before untrusted code runs"
     )
+
+
+def test_screening_bound_is_not_reported_as_a_confidence_bound():
+    """The name is the claim, so pin it.
+
+    The statistic is computed like a one-sided 97.5% bound but carries no coverage:
+    BFTS reuses one fixed seed set across nodes, makes no multiplicity adjustment, and
+    reports the campaign argmax. Anything calling it a confidence bound overclaims.
+    """
+    import pathlib
+
+    # Built at runtime so this file does not itself contain the banned literal.
+    banned = "lower_" + "confidence_bound"
+
+    result = run_learning_benchmark(
+        "autoresearch_candidate", seed=7, num_seeds=2, scenarios=(TINY_SCORED,)
+    )
+    scenario = result["scenarios"]["tiny_scored"]
+    assert "lower_screening_bound" in scenario
+    assert banned not in scenario
+
+    root = pathlib.Path(learning_benchmark.__file__).resolve().parents[3]
+    tracked = list((root / "conformal_marl").rglob("*.py"))
+    tracked += list((root / "tests").rglob("*.py"))
+    tracked.append(root / "conformal_marl/autoresearch/README.md")
+    offenders = [
+        path.name
+        for path in tracked
+        if banned in path.read_text(encoding="utf-8")
+    ]
+    assert not offenders, f"stale confidence-bound naming in {offenders}"

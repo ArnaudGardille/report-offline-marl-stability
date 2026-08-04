@@ -38,8 +38,12 @@ uv run python -m conformal_marl.autoresearch.evaluate \
   --output outputs/autoresearch_learning.json
 ```
 
-Its score is a one-sided Student-t lower confidence bound on paired improvement over
-uniform replay, weighting mean training return 0.6 and final greedy return 0.4.
+Its score is a one-sided Student-t lower *screening* bound on paired improvement over
+uniform replay, weighting mean training return 0.6 and final greedy return 0.4. It is
+not a confidence bound and should not be reported as one: BFTS reuses a single fixed
+seed set across every node, applies no multiplicity adjustment, and reports the argmax
+over the campaign, so the bound carries no nominal coverage. Treat it as a conservative
+ranking statistic.
 Simultaneous-Attack is a support-preservation gate, not a target to game: the candidate
 must pass a non-inferiority test there, and failing it sets `primary_score` to `-inf` --
 a hard rejection, so a gate-failing candidate can never outrank a gate-passing one under
