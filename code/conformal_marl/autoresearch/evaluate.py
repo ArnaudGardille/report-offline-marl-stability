@@ -6,17 +6,42 @@ import argparse
 import json
 from pathlib import Path
 
-# Importing the module runs its ``@register_sampler`` decorator, which is how the
-# learning tier resolves ``"autoresearch_candidate"`` by name. Keep this import even
-# if ``estimate_operator`` stops being used here -- dropping it would leave the
-# learning tier unable to find the candidate's sampler.
-from conformal_marl.autoresearch.candidate import estimate_operator
-from conformal_marl.autoresearch.frozen.learning_benchmark import run_learning_benchmark
-from conformal_marl.autoresearch.frozen.mechanism_benchmark import (
+# ---------------------------------------------------------------------------
+# Import order is load-bearing and must not be sorted.
+#
+# The frozen scorers and the sampler registry are imported FIRST, so that the
+# baseline snapshot in ``conformal_marl.samplers`` is sealed before any generated
+# candidate module executes. With the candidate imported first, its module-level code
+# would run while ``conformal_marl.samplers`` was still absent from ``sys.modules``,
+# and could install a substitute that the frozen benchmarks would then import as
+# their own dependency.
+#
+# ``ruff``'s isort rule (I001) is not enabled for this project; if it is ever turned
+# on, this block needs an explicit ``# isort: skip_file`` rather than a reordering.
+# ``test_frozen_scorers_are_imported_before_candidate_code`` pins the order.
+# ---------------------------------------------------------------------------
+from conformal_marl.samplers import assert_baseline_integrity  # isort: skip
+from conformal_marl.autoresearch.frozen.learning_benchmark import (  # isort: skip
+    run_learning_benchmark,
+)
+from conformal_marl.autoresearch.frozen.mechanism_benchmark import (  # isort: skip
     MechanismSweepConfig,
     run_mechanism_benchmark,
 )
-from conformal_marl.autoresearch.frozen.operator_benchmark import run_operator_benchmark
+from conformal_marl.autoresearch.frozen.operator_benchmark import (  # isort: skip
+    run_operator_benchmark,
+)
+
+# Only now the untrusted module. Importing it runs its ``@register_sampler``
+# decorator, which is how the learning tier resolves ``"autoresearch_candidate"`` by
+# name. Keep this import even if ``estimate_operator`` stops being used here --
+# dropping it would leave the learning tier unable to find the candidate's sampler.
+from conformal_marl.autoresearch.candidate import estimate_operator  # isort: skip
+
+# Fail fast if importing the candidate already displaced a control sampler. This is a
+# snapshot, not a guarantee -- the benchmarks re-check before each control arm,
+# because the registry is consulted at call time.
+assert_baseline_integrity()
 
 DEFAULT_NUM_SEEDS = 8
 DEFAULT_TRIALS = 128

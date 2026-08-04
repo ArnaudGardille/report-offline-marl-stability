@@ -397,3 +397,50 @@ def policy_floor_sampler(
     return _conformal_select_floor(
         buffer, buffer_state, rng, ctx, batch_size, policy_scores, rho_weights=False
     )
+
+
+# --------------------------------------------------------------- baseline integrity
+#
+# Automated-search candidate code is imported into *this* interpreter, so the module
+# it edits and the registry the benchmark scores against share an address space. The
+# built-in samplers are what every candidate is measured *against*: if a candidate can
+# rebind one of them, it moves its own control arm and the reported delta is
+# meaningless.
+#
+# Sealing a snapshot here -- at the end of this module's body, before any candidate
+# module has had a chance to run -- gives the benchmark something trustworthy to
+# compare against later. ``register_sampler`` refuses duplicate names, but that guards
+# only the decorator; a direct ``_SAMPLER_REGISTRY[name] = ...`` assignment does not
+# go through it.
+#
+# This is a *correctness* guard against accident and casual tampering, not a security
+# boundary: code sharing an interpreter can defeat any in-process check, and a
+# determined candidate still has the whole runtime. Real isolation needs an OS-level
+# sandbox. What it buys is that the common failure -- a candidate that shadows a
+# baseline name and silently scores itself against itself -- is caught loudly instead
+# of producing a plausible wrong number.
+_TRUSTED_BASELINES: dict[str, Sampler] = dict(_SAMPLER_REGISTRY)
+
+
+def trusted_baselines() -> list[str]:
+    """Names sealed before any candidate module could be imported."""
+    return sorted(_TRUSTED_BASELINES)
+
+
+def assert_baseline_integrity(*names: str) -> None:
+    """Raise if a sealed baseline no longer resolves to the function sealed here.
+
+    Call this immediately before *using* a baseline as a control arm, not only at
+    import time: the registry is consulted at call time, so an import-time check alone
+    is a snapshot that says nothing about what a later lookup will return.
+    """
+    checked = names or tuple(_TRUSTED_BASELINES)
+    for name in checked:
+        if name not in _TRUSTED_BASELINES:
+            raise RuntimeError(f"{name!r} is not a sealed baseline sampler")
+        if _SAMPLER_REGISTRY.get(name) is not _TRUSTED_BASELINES[name]:
+            raise RuntimeError(
+                f"the control sampler {name!r} is no longer the frozen implementation "
+                "sealed at import; refusing to report a score against a modified "
+                "baseline"
+            )

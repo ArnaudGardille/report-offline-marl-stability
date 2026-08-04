@@ -75,6 +75,13 @@ which avoids reinstalling JAX for every node. Search outputs remain under ignore
 in the paper repository. Run generated code in an OS-level sandbox, and disclose AI
 Scientist use in any resulting manuscript.
 
+The evaluator imports the frozen scorers before the generated candidate, which seals a
+snapshot of the built-in samplers, and re-checks that snapshot before each control arm
+runs. This catches a candidate that shadows a baseline name and would otherwise score
+itself against itself. It is a correctness guard, not a security boundary: candidate
+code shares this interpreter and can defeat any in-process check, so the OS-level
+sandbox above is what actually contains it.
+
 The search sees 8 paired seeds by default. After BFTS stops, the highest-ranked unique
 candidate is frozen and rerun on a distinct master seed with a 128-trial mechanism sweep
 and 32 paired learning seeds. The held-out result is confirmatory: it cannot select a
