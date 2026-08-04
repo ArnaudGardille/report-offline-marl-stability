@@ -7,9 +7,12 @@ import json
 import numpy as np
 import pytest
 
+from conformal_marl.autoresearch import evaluate
 from conformal_marl.autoresearch.candidate import sample_replay  # noqa: F401
 from conformal_marl.autoresearch.frozen import learning_benchmark
 from conformal_marl.autoresearch.frozen.learning_benchmark import (
+    DEFAULT_LEARNING_SCENARIOS,
+    HELDOUT_LEARNING_SCENARIOS,
     LearningScenario,
     run_learning_benchmark,
 )
@@ -372,3 +375,86 @@ def test_screening_bound_is_not_reported_as_a_confidence_bound():
         if banned in path.read_text(encoding="utf-8")
     ]
     assert not offenders, f"stale confidence-bound naming in {offenders}"
+def test_heldout_learning_profile_shifts_the_task_not_only_the_seed():
+    """The confirmatory profile must change the task distribution itself.
+
+    A held-out stage that only redraws seeds tests variance, not generalization, so
+    assert the shifted axes explicitly rather than trusting the constant's name.
+    """
+    search = {scenario.name: scenario for scenario in DEFAULT_LEARNING_SCENARIOS}
+    heldout = {scenario.name: scenario for scenario in HELDOUT_LEARNING_SCENARIOS}
+    assert set(search) & set(heldout) == set()
+
+    simu = heldout["simultaneous_attack_support_4_agents"]
+    assert simu.env_kwargs["num_agents"] == 4
+    assert search["simultaneous_attack_support"].env_kwargs["num_agents"] == 3
+    assert simu.support_gate is True
+
+    storm = heldout["storm_cooperative_long_horizon"]
+    assert storm.env_kwargs["num_inner_steps"] == 64
+    assert search["storm_cooperative"].env_kwargs["num_inner_steps"] == 48
+    # JaxMARL's bare "storm" is the unadapted N-player InTheGrid and raises at
+    # construction; the adapted cooperative game is "storm_2p".
+    assert storm.env_name == "storm_2p"
+
+    for scenario in HELDOUT_LEARNING_SCENARIOS:
+        scenario.validate()
+
+
+def test_heldout_return_scales_keep_the_gate_equally_strict():
+    """A scale mismatch silently retunes the confirmatory gate.
+
+    Both stages compare a normalized delta against the same ``minimum_score``, so
+    ``return_scale`` is not free: it must track the achievable return, or the
+    confirmatory stage stops confirming the screen at the strictness the screen used.
+    """
+    search = {scenario.name: scenario for scenario in DEFAULT_LEARNING_SCENARIOS}
+    heldout = {scenario.name: scenario for scenario in HELDOUT_LEARNING_SCENARIOS}
+
+    # Simultaneous-Attack pays +1 for the all-attack joint action at any agent count,
+    # so the achievable return -- and therefore the scale -- must not move with N.
+    assert (
+        heldout["simultaneous_attack_support_4_agents"].return_scale
+        == search["simultaneous_attack_support"].return_scale
+    )
+
+    # STORM return is a sum over inner steps, so its scale tracks the horizon ratio.
+    horizon_ratio = (
+        heldout["storm_cooperative_long_horizon"].env_kwargs["num_inner_steps"]
+        / search["storm_cooperative"].env_kwargs["num_inner_steps"]
+    )
+    assert heldout["storm_cooperative_long_horizon"].return_scale == pytest.approx(
+        search["storm_cooperative"].return_scale * horizon_ratio
+    )
+
+
+def test_learning_profile_dispatch_selects_the_heldout_scenarios(monkeypatch):
+    """Guard the wiring, not just the constants.
+
+    Without this the profile flag could be dropped entirely and the suite would stay
+    green while the held-out stage silently re-ran the search benchmark and the
+    campaign recorded the result as confirmatory.
+    """
+    seen: dict[str, object] = {}
+
+    def _capture(candidate_sampler, *, seed, num_seeds, **kwargs):
+        seen["scenarios"] = kwargs["scenarios"]
+        return {"status": "ok", "primary_score": 0.0}
+
+    monkeypatch.setattr(evaluate, "run_learning_benchmark", _capture)
+
+    evaluate.evaluate_candidate(tier="learning", seed=1, trials=2, num_seeds=2)
+    assert seen["scenarios"] is DEFAULT_LEARNING_SCENARIOS
+
+    evaluate.evaluate_candidate(
+        tier="learning", seed=1, trials=2, num_seeds=2, learning_profile="heldout"
+    )
+    assert seen["scenarios"] is HELDOUT_LEARNING_SCENARIOS
+
+
+def test_unknown_learning_profile_raises_instead_of_running_the_search_screen():
+    """A typo must not be recorded as a held-out result."""
+    with pytest.raises(ValueError, match="unknown learning profile"):
+        evaluate.evaluate_candidate(
+            tier="learning", seed=1, trials=2, num_seeds=2, learning_profile="held-out"
+        )

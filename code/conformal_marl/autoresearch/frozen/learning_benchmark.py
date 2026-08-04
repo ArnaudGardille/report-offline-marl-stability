@@ -127,6 +127,74 @@ DEFAULT_LEARNING_SCENARIOS = (
     ),
 )
 
+# Confirmatory scenarios for the frozen finalist. These change the *task*, not just
+# the random seed: a fourth Simultaneous-Attack agent (which enlarges the joint action
+# space and makes the rare all-attack optimum exponentially rarer) and a longer STORM
+# horizon.
+#
+# ``return_scale`` is deliberately not a free constant here. Both stages compare a
+# normalized delta against the same ``minimum_score``, so any scale mismatch between
+# search and held-out silently changes how strict the confirmatory gate is relative to
+# the screen it confirms:
+#
+# * Simultaneous-Attack keeps ``4.0``. Its team reward is ``+1`` for the all-attack
+#   joint action regardless of ``N`` (see :mod:`conformal_marl.envs.simultaneous_attack`),
+#   so the achievable return does not change with the agent count -- measured mean
+#   uniform return 0.982 at N=3 and 0.975 at N=4. An earlier revision of this scenario
+#   used ``5.0``, which made the confirmatory support gate 25% more permissive in raw
+#   return than the screening gate.
+# * STORM scales with the horizon, because its return is a sum over inner steps:
+#   ``16.0 * 64 / 48``. Measured returns grow by rather more than the horizon ratio
+#   (learning progress differs too), so this equalizes the mechanical part of the
+#   change only; it is not a full recalibration of the two stages onto one scale.
+HELDOUT_LEARNING_SCENARIOS = (
+    LearningScenario(
+        name="simultaneous_attack_support_4_agents",
+        env_name="simu",
+        env_kwargs={"num_agents": 4},
+        config_overrides={
+            "total_timesteps": 8_192,
+            "num_envs": 8,
+            "num_steps": 8,
+            "num_grad_steps": 4,
+            "learning_starts": 128,
+            "hidden_dim": 32,
+            "batch_size": 64,
+            "buffer_size": 8_192,
+            "cal_size": 32,
+            "epsilon_anneal_time": 4_096,
+            "eval_episodes": 32,
+            "eval_steps": 2,
+            "eval_during_training": True,
+        },
+        return_scale=4.0,
+        support_gate=True,
+    ),
+    LearningScenario(
+        name="storm_cooperative_long_horizon",
+        # JaxMARL's bare ``storm`` is the N-player InTheGrid, whose observation API
+        # StormAdapter does not handle; ``storm_2p`` is the adapted cooperative game.
+        env_name="storm_2p",
+        env_kwargs={"num_inner_steps": 64},
+        config_overrides={
+            "total_timesteps": 20_480,
+            "num_envs": 8,
+            "num_steps": 32,
+            "num_grad_steps": 4,
+            "learning_starts": 256,
+            "hidden_dim": 64,
+            "batch_size": 64,
+            "buffer_size": 20_480,
+            "cal_size": 64,
+            "epsilon_anneal_time": 12_000,
+            "eval_episodes": 8,
+            "eval_steps": 64,
+            "eval_during_training": True,
+        },
+        return_scale=16.0 * 64 / 48,
+    ),
+)
+
 
 def _run_sampler(scenario: LearningScenario, sampler_name: str, seeds: np.ndarray) -> dict:
     overrides = dict(scenario.config_overrides)
