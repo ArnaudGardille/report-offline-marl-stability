@@ -17,18 +17,14 @@ import jax.numpy as jnp
 import numpy as np
 
 from conformal_marl.iql import IQLConfig
-from conformal_marl.replay import Transition
+from conformal_marl.replay import Transition, empty_transition, make_replay_buffer
 from conformal_marl.samplers import uniform_sampler
 
 _N, _A, _D = 3, 2, 4
 
 
 def _drawn(draw: int) -> Transition:
-    """A drawn batch of ``draw`` items, each tagged with its position in the draw.
-
-    Positions are distinct by construction, so any repeat in a subsample is the
-    sampler double-counting -- not an artifact of the buffer drawing with replacement.
-    """
+    """A drawn batch of ``draw`` items, each tagged with its position in the draw."""
     return Transition(
         obs=jnp.zeros((draw, _N, _D)),
         actions=jnp.zeros((draw, _N), jnp.int32),
@@ -57,7 +53,7 @@ def _ids(batch: Transition) -> np.ndarray:
     return np.asarray(batch.reward[:, 0]).astype(int)
 
 
-def test_uniform_subsamples_a_large_draw_to_the_trained_batch_size():
+def test_uniform_keeps_the_first_trained_batch_from_a_large_draw():
     batch_size, draw = 64, 256
     sample = jax.jit(
         lambda key: uniform_sampler(_buffer(draw), None, key, None, batch_size)
@@ -67,27 +63,40 @@ def test_uniform_subsamples_a_large_draw_to_the_trained_batch_size():
     assert batch.reward.shape[0] == batch_size
     assert weights.shape[0] == batch_size
     assert jnp.all(weights == 1.0)
-    # Without replacement: a repeated index would double-count a transition's gradient.
-    assert len(set(_ids(batch).tolist())) == batch_size
+    assert _ids(batch).tolist() == list(range(batch_size))
 
 
-def test_uniform_subsample_is_unbiased_across_the_draw():
-    batch_size, draw, repeats = 32, 256, 400
-    sample = jax.jit(
-        lambda key: uniform_sampler(_buffer(draw), None, key, None, batch_size)
+def test_uniform_prefix_reaches_all_stored_buffer_items():
+    """The returned B positions remain iid uniform over stored transitions.
+
+    Flashbax samples every position of its L draw independently with replacement. The
+    test therefore checks reachability and balance over buffer *items*, not over the L
+    positions of one synthetic draw.
+    """
+    item_count, batch_size, draw, repeats = 32, 8, 64, 400
+    base = empty_transition(_N, _D, _A)
+    stored = jax.tree.map(
+        lambda x: jnp.broadcast_to(x, (item_count,) + x.shape), base
+    ).replace(
+        reward=jnp.tile(jnp.arange(item_count, dtype=jnp.float32)[:, None], (1, _N))
     )
-    counts = np.zeros(draw)
+    buffer = make_replay_buffer(
+        max_size=draw, min_size=item_count, sample_batch_size=draw
+    )
+    state = buffer.add(buffer.init(base), stored)
+    sample = jax.jit(
+        lambda key: uniform_sampler(buffer, state, key, None, batch_size)
+    )
+    counts = np.zeros(item_count)
     for key in range(repeats):
         batch, _, _ = sample(jax.random.PRNGKey(key))
-        counts[_ids(batch)] += 1
+        np.add.at(counts, _ids(batch), 1)
 
-    # Every position in the draw must be reachable. A positional shortcut such as
-    # "keep the first B" would leave draw - B positions at exactly zero.
-    expected = counts.sum() / draw
+    expected = counts.sum() / item_count
     assert counts.min() > 0.0
     assert abs(counts.mean() - expected) < 1e-6
-    # Multinomial per-cell sd is ~sqrt(expected); 6 sd never flakes but still catches
-    # a materially skewed selection.
+    # Per-cell count variation is O(sqrt(expected)); this loose deterministic bound
+    # catches a materially skewed or unreachable buffer item without becoming flaky.
     assert counts.std() < 6.0 * np.sqrt(expected)
 
 

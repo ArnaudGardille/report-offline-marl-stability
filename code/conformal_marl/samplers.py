@@ -130,8 +130,10 @@ def uniform_sampler(
     """Plain uniform sampling: flashbax uniform draw, unit weights.
 
     Draws the buffer's ``sample_batch_size`` items ``L`` and, when ``L > batch_size``,
-    subsamples uniformly without replacement down to the trained size ``B``, weighting
-    every kept sample by 1 so the TD loss is unchanged.
+    keeps the first ``B`` items, weighting every kept sample by 1 so the TD loss is
+    unchanged. Flashbax's item buffer draws each of the ``L`` positions independently
+    and uniformly with replacement, so its first ``B`` positions are already an ordinary
+    uniform replay batch; selecting them again would only add work.
 
     That subsample is what makes ``large_batch_size`` usable as an experimental knob.
     The selection samplers below follow the LaBER recipe -- draw ``L``, keep ``B`` --
@@ -148,19 +150,7 @@ def uniform_sampler(
     batch: Transition = sample.experience
     drawn = batch.reward.shape[0]  # static under jit
     if drawn > batch_size:
-        # Local import to avoid a module-load cycle (conformal imports replay only).
-        from conformal_marl.conformal import gumbel_top_k, tree_index
-
-        # Constant log-weights: Gumbel-top-k over equal weights is exactly a uniform
-        # subset without replacement, and reuses the same tested selection path the
-        # conformal samplers use. ``fold_in`` rather than ``split`` so the draw above
-        # keeps consuming the caller's key unchanged.
-        idx_B = gumbel_top_k(
-            jnp.zeros((drawn,), dtype=jnp.float32),
-            batch_size,
-            jax.random.fold_in(rng, 1),
-        )
-        batch = tree_index(batch, idx_B)
+        batch = jax.tree.map(lambda x: x[:batch_size], batch)
     weights = jnp.ones((batch.reward.shape[0],), dtype=jnp.float32)
     return batch, weights, {}
 
