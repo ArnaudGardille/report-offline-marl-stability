@@ -98,3 +98,28 @@ Simu false-alarm lab + the swap streams) is on the order of minutes per layout; 
 win is running the multi-seed sweep in parallel rather than a longer single train. A smoke
 equivalent (`--smoke`) runs in CI-time on CPU and is what is verified in this PR. Scale the
 budgets in the `SCALE` table down (or up) for your session.
+
+## Recovery benchmark on Overcooked (needs a GPU)
+
+`scripts/recovery_benchmark.py` asks the decisive control question: after a co-learner
+drift, does driving the replay buffer from the drift detector (flush-on-alarm + Channel-B
+half-life) recover **return** faster than a static buffer? On **MPE `simple_spread` (CPU)**
+the verdict is a clean **negative** — forgetting worsens post-drift return (an empirical
+temporal analogue of support loss; see §5 of the paper). Overcooked is the
+higher-coordination check, where partner
+conventions matter more, but its sparse reward needs a real training budget: **at CPU-smoke
+scale the pretrained policy never learns the task (returns stay ~0), so a meaningful
+recovery result requires a GPU.** The code path is env-agnostic (verified end-to-end on
+Overcooked at `--smoke`); to get a real result, run on Colab GPU:
+
+```bash
+# after the JAX 0.4.30 + CUDA install above:
+python scripts/recovery_benchmark.py --full --drift scripted --env overcooked --seeds 8
+# (also worth running --drift policy as the milder, realistic-drift comparison)
+```
+
+This writes `code/results/recovery_overcooked_<drift>_full.png` and the paired-verdict
+JSON to `code/outputs/`. Expect it to either corroborate the MPE negative or, if
+Overcooked's stronger coordination makes stale data genuinely harmful, show a positive —
+either outcome is reportable. Budgets live in the `RecoveryConfig` `--full` branch of the
+script; the `pretrain()` timestep count is the main GPU lever.

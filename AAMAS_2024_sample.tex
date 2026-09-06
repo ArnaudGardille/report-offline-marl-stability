@@ -814,6 +814,48 @@ weighting restores $85.8\%$, the one-sided bound holding throughout. Both are
 super-uniform with coverage tending to the nominal level as drift$\,\to0$, matching
 Lemma~\ref{lem:certify}.
 
+\paragraph{Forgetting-based replay control hurts in this setting.} The tempting way to
+\emph{act} on the detector is to forget: when the frozen alarm fires, flush the stale
+buffer, and let the drift rate shorten the buffer half-life. We test whether this
+improves \emph{return} recovery after a co-learner drift on MPE \texttt{simple\_spread}.
+A single ego agent learns by IQL while its partners---coherent before a known step---switch
+to a non-cooperative scripted policy after it, a controlled swap that both lowers the team
+return and is strongly non-conforming. Policies A/B are pretrained once and shared across
+the $12$ recovery/environment RNG runs (the scripted post-swap arm uses a fixed action);
+the reported SEM are therefore conditional on this fixed pretraining and do not measure
+end-to-end training variability. The detector behaves exactly as designed, firing on
+$12/12$ seeds at a mean delay of $733$ steps; but acting on it does \emph{not} help. Against
+a \textsc{static} buffer that keeps all data, the alarm-flush-plus-half-life controller is
+\emph{worse}: the paired detector-minus-static differences are
+$\Delta_{\mathrm{final}}=-1.28\pm0.31$ and $\Delta_{\mathrm{AUC}}=-0.60\pm0.17$
+(conditional mean $\pm$ SEM), both beyond $2$ conditional SEM. The ranking is monotone in
+how much each arm forgets
+(\textsc{static} $>$ constant short half-life $>$ oracle reset $\approx$ controller;
+Figure~\ref{fig:recovery}). The pattern is consistent with an empirical temporal analogue
+of the support-loss mechanism in Theorem~\ref{thm:starvation}: flushing or aggressively
+discounting old data can reduce useful coverage. It is not a formal instance of the theorem,
+which assumes tabular or local linear features and zero-weight support deletion; moreover the partner swap changes
+the learner's perceived kernel even though the underlying environment dynamics are fixed.
+The tested detector-triggered forgetting policy therefore worsens post-drift return in this
+setting, but the experiment does not establish the benefit of a corrective reweighting arm.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.92\linewidth]{recovery_MPE_simple_spread_v3_scripted_full.png}
+  \caption{Return recovery after a co-learner drift (MPE \texttt{simple\_spread}, $12$
+  seeds). The detector fires reliably (mean delay $+733$ steps, dotted line). Each
+  forgetting-based replay control---the two-channel controller (alarm-flush $+$ half-life),
+  an oracle flushing at the \emph{known} swap, and a constant short half-life---has lower
+  mean final return than a \textsc{static} buffer that keeps all data. The pattern is
+  consistent with
+  loss of useful replay coverage, but Theorem~\ref{thm:starvation} does not directly cover
+  age-weighted nonlinear replay. Bands: $\pm1$
+  inter-seed SEM.}
+  \label{fig:recovery}
+  \Description{Greedy team return versus environment step for four replay-control arms after
+  a partner swap; the static keep-all buffer has the highest mean final return.}
+\end{figure}
+
 \begin{figure}[t]
   \centering
   \includegraphics[width=0.84\linewidth]{m6_support_starvation_collapse.png}
@@ -901,7 +943,13 @@ cautionary: we prove, and confirm empirically, that outside the exact-ratio
 regime selection starves the support it needs and underperforms uniform replay.
 Detection and certification are thus the robust contributions; selection is safe
 only in the narrow regime where it coincides with the (often unavailable)
-importance ratio.
+importance ratio. The caution has an empirical temporal analogue: driving replay to
+\emph{forget} on a detected drift---flushing the buffer or shortening its half-life---worsens
+post-drift return in our MPE study. This result does not formally
+extend Theorem~\ref{thm:starvation} to age-weighted replay, nor does it test corrective
+reweighting on the recovery task. Scaling this
+recovery study to higher-coordination benchmarks such as Overcooked, where partner
+conventions matter more, is left to future work.
 
 \balance
 
