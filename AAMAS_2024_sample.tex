@@ -830,10 +830,8 @@ a \textsc{static} buffer that keeps all data, the alarm-flush-plus-half-life con
 $\Delta_{\mathrm{final}}=-1.28\pm0.31$ and $\Delta_{\mathrm{AUC}}=-0.60\pm0.17$
 (conditional mean $\pm$ SEM), both beyond $2$ conditional SEM. The ranking is monotone in
 how much each arm forgets
-(\textsc{static} $>$ constant short half-life $>$ oracle reset $\approx$ controller). An
-\emph{oracle} that flushes at the \emph{known} change point performs similarly to the
-detector, making detection delay an unlikely sole explanation
-(Figure~\ref{fig:recovery}). The pattern is consistent with an empirical temporal analogue
+(\textsc{static} $>$ constant short half-life $>$ oracle reset $\approx$ controller;
+Figure~\ref{fig:recovery}). The pattern is consistent with an empirical temporal analogue
 of the support-loss mechanism in Theorem~\ref{thm:starvation}: flushing or aggressively
 discounting old data can reduce useful coverage. It is not a formal instance of the theorem,
 which assumes tabular or local linear features and zero-weight support deletion; moreover the partner swap changes
