@@ -104,8 +104,9 @@ budgets in the `SCALE` table down (or up) for your session.
 `scripts/recovery_benchmark.py` asks the decisive control question: after a co-learner
 drift, does driving the replay buffer from the drift detector (flush-on-alarm + Channel-B
 half-life) recover **return** faster than a static buffer? On **MPE `simple_spread` (CPU)**
-the verdict is a clean **negative** — forgetting starves the learner (support starvation in
-time; see §5 of the paper). Overcooked is the higher-coordination check, where partner
+the verdict is a clean **negative** — forgetting worsens post-drift return (an empirical
+temporal analogue of support loss; see §5 of the paper). Overcooked is the
+higher-coordination check, where partner
 conventions matter more, but its sparse reward needs a real training budget: **at CPU-smoke
 scale the pretrained policy never learns the task (returns stay ~0), so a meaningful
 recovery result requires a GPU.** The code path is env-agnostic (verified end-to-end on
