@@ -820,12 +820,15 @@ buffer, and let the drift rate shorten the buffer half-life. We test whether thi
 improves \emph{return} recovery after a co-learner drift on MPE \texttt{simple\_spread}.
 A single ego agent learns by IQL while its partners---coherent before a known step---switch
 to a non-cooperative scripted policy after it, a controlled swap that both lowers the team
-return and is strongly non-conforming. The detector behaves exactly as designed, firing on
+return and is strongly non-conforming. Policies A/B are pretrained once and shared across
+the $12$ recovery/environment RNG runs (the scripted post-swap arm uses a fixed action);
+the reported SEM are therefore conditional on this fixed pretraining and do not measure
+end-to-end training variability. The detector behaves exactly as designed, firing on
 $12/12$ seeds at a mean delay of $733$ steps; but acting on it does \emph{not} help. Against
 a \textsc{static} buffer that keeps all data, the alarm-flush-plus-half-life controller is
 \emph{worse}: the paired detector-minus-static differences are
 $\Delta_{\mathrm{final}}=-1.28\pm0.31$ and $\Delta_{\mathrm{AUC}}=-0.60\pm0.17$
-(mean $\pm$ SEM), both beyond $2$ SEM over $12$ seeds. The ranking is monotone in
+(conditional mean $\pm$ SEM), both beyond $2$ conditional SEM. The ranking is monotone in
 how much each arm forgets
 (\textsc{static} $>$ constant short half-life $>$ oracle reset $\approx$ controller). An
 \emph{oracle} that flushes at the \emph{known} change point performs similarly to the
@@ -842,17 +845,17 @@ setting, but the experiment does not establish the benefit of a corrective rewei
   \centering
   \includegraphics[width=0.92\linewidth]{recovery_MPE_simple_spread_v3_scripted_full.png}
   \caption{Return recovery after a co-learner drift (MPE \texttt{simple\_spread}, $12$
-  seeds). The detector fires reliably (mean delay $+733$ steps, dotted line), yet every
+  seeds). The detector fires reliably (mean delay $+733$ steps, dotted line). Each
   forgetting-based replay control---the two-channel controller (alarm-flush $+$ half-life),
-  an oracle flushing at the \emph{known} swap, and a constant short half-life---recovers
-  \emph{below} a \textsc{static} buffer that keeps all data. The pattern is consistent with
+  an oracle flushing at the \emph{known} swap, and a constant short half-life---has lower
+  mean final return than a \textsc{static} buffer that keeps all data. The pattern is
+  consistent with
   loss of useful replay coverage, but Theorem~\ref{thm:starvation} does not directly cover
   age-weighted nonlinear replay. Bands: $\pm1$
   inter-seed SEM.}
   \label{fig:recovery}
   \Description{Greedy team return versus environment step for four replay-control arms after
-  a partner swap; the static keep-all buffer recovers highest while the buffer-flushing arms
-  stay below it.}
+  a partner swap; the static keep-all buffer has the highest mean final return.}
 \end{figure}
 
 \begin{figure}[t]
