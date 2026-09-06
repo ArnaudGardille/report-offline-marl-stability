@@ -95,7 +95,9 @@ def make_replay_buffer(
     sample_batch_size:
         Default number of items drawn per ``buffer.sample`` call. For the
         LaBER-style "draw L, train on B<=L" seam this is the **large** batch ``L``
-        (the sampler decides the trained subset ``B``).
+        (the sampler decides the trained subset ``B``). The item buffer samples those
+        positions independently with replacement, so uniform replay can use the first
+        ``B`` directly while selection samplers inspect all ``L``.
 
     Returns
     -------
