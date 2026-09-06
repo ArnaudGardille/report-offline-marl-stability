@@ -135,7 +135,7 @@ def uniform_sampler(
     and uniformly with replacement, so its first ``B`` positions are already an ordinary
     uniform replay batch; selecting them again would only add work.
 
-    That subsample is what makes ``large_batch_size`` usable as an experimental knob.
+    Returning exactly ``B`` items makes ``large_batch_size`` usable as an experimental knob.
     The selection samplers below follow the LaBER recipe -- draw ``L``, keep ``B`` --
     so if this one instead trained on all ``L`` items, raising ``L`` would hand the
     uniform control ``L/B`` times more gradient data than every selecting arm and
