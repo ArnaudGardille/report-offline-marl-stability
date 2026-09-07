@@ -1,4 +1,4 @@
-"""Power check for the paired learning screen.
+"""Fixed-design sensitivity check for the paired learning screen.
 
 `autoresearch/frozen/learning_benchmark.py` decides whether an automatically
 generated replay candidate improved sample efficiency. PR #34 shipped it with an
@@ -11,8 +11,8 @@ Two families of probe sampler are registered here (never in the frozen package -
 they are measurement instruments, not candidates):
 
 * ``probe_uniform_reseed`` is distributionally identical to ``uniform`` but draws on
-  an independently folded key. Its paired delta against ``uniform`` is pure noise, so
-  the width of its confidence interval *is* the screen's noise floor.
+  an independently folded key. Its paired delta measures the empirical variability
+  between two equal-law replay draws on this fixed seed set.
 * ``probe_collapse_k`` draws the usual uniform batch and then keeps only ``k``
   distinct rows, tiling them back to the trained batch size. ``k = batch_size`` is
   the identity; smaller ``k`` monotonically destroys the diversity of the replay
@@ -20,8 +20,8 @@ they are measurement instruments, not candidates):
   every gradient step on a single repeated transition and is about as degraded as a
   sampler can be while still running.
 
-The screen has usable power only if the degraded probes land clearly outside the
-noise floor. Run from ``code/``:
+The check is informative only if degraded probes separate from the equal-law probe on
+the paired seeds. It is a stress test, not a general power guarantee. Run from ``code/``:
 
     uv run python scripts/screen_power_check.py --num-seeds 8
 """
@@ -177,7 +177,8 @@ def main() -> None:
         }
         detail = "  ".join(
             f"{name}: d={payload['mean_utility_delta']:+.5f} "
-            f"sem={payload['utility_sem']:.5f} lcb={payload['lower_confidence_bound']:+.5f}"
+            f"sem={payload['utility_sem']:.5f} "
+            f"lcb={payload['lower_screening_bound']:+.5f}"
             for name, payload in scored.items()
         )
         print(
@@ -185,9 +186,8 @@ def main() -> None:
             f"status={out['status']:18s} {detail}"
         )
 
-    # A screen has power only if a *known-bad* sampler is resolvable from a *known-null*
-    # one. Comparing a probe's own confidence bound against zero does not test that:
-    # the null probe's bound is below zero too, purely from seed noise.
+    # Compare deliberately degraded replay with an equal-law draw on each seed. Their
+    # shared uniform control then cancels before estimating the standard error.
     null = results["probe_uniform_reseed"]
     verdict: dict[str, dict] = {}
     print("\n== verdict ==")
@@ -195,9 +195,8 @@ def main() -> None:
     gate_minimum = 0.001  # the learning stage's minimum_score in orchestration.py
     null_passes = null["primary_score"] >= gate_minimum
     # A one-sided lower bound on a zero-mean delta is negative by construction, so a
-    # null sampler *should* fail the gate -- that is the gate being conservative, not
-    # broken. The number that matters is how large a real improvement has to be before
-    # the bound clears the threshold: the minimum detectable effect.
+    # equal-law sampler *should* fail the gate. The approximation below shows how large
+    # an improvement must be before the bound clears the threshold at this variance.
     scored_null = [p for p in null["scenarios"].values() if not p["support_gate"]]
     mde = gate_minimum + null["critical_value"] * float(
         np.mean([p["utility_sem"] for p in scored_null])
@@ -208,8 +207,8 @@ def main() -> None:
         f"{'passes' if null_passes else 'rejected (expected: the bound is one-sided)'}"
     )
     print(
-        f"  minimum detectable effect: a candidate must beat uniform by "
-        f"{mde:+.5f} in scaled utility to be promotable at {args.num_seeds} seeds"
+        f"  approximate promotion threshold under observed equal-law variance: "
+        f"{mde:+.5f} scaled utility at {args.num_seeds} seeds"
     )
 
     ordering = [(p, results[p]["primary_score"]) for p in probes]
@@ -218,7 +217,7 @@ def main() -> None:
         f"probe_collapse_{k}" for k in sorted(COLLAPSE_LEVELS, reverse=True)
     ]
     print(f"  ranking by score (best first): {ranked}")
-    print(f"  ranking truth would require:   {expected}")
+    print(f"  expected diagnostic ordering:  {expected}")
     print(f"  -> monotone in degradation: {'yes' if ranked == expected else 'NO'}")
 
     for scenario_name, null_payload in null["scenarios"].items():
@@ -234,11 +233,14 @@ def main() -> None:
             payload = results[probe]["scenarios"][scenario_name]
             delta = payload["mean_utility_delta"]
             sem = payload["utility_sem"]
-            # Resolvable iff the probe's one-sided interval sits strictly below the
-            # null's -- i.e. the screen can tell this sampler apart from replay that
-            # differs from uniform only by its random draw.
-            separation = null_delta - delta
-            spread = crit * float(np.hypot(sem, floor))
+            null_paired = np.asarray(null_payload["paired_utility_delta"], dtype=np.float64)
+            probe_paired = np.asarray(payload["paired_utility_delta"], dtype=np.float64)
+            paired_separation = null_paired - probe_paired
+            separation = float(paired_separation.mean())
+            separation_sem = float(
+                paired_separation.std(ddof=1) / np.sqrt(paired_separation.size)
+            )
+            spread = crit * separation_sem
             resolved = separation > spread
             ratio = abs(delta) / floor if floor > 0 else float("inf")
             verdict[scenario_name]["probes"][probe] = {
@@ -246,6 +248,7 @@ def main() -> None:
                 "sem": sem,
                 "delta_vs_noise_floor": ratio,
                 "separation_from_null": separation,
+                "separation_sem": separation_sem,
                 "required_separation": spread,
                 "resolved": bool(resolved),
             }
@@ -266,7 +269,7 @@ def main() -> None:
                 "verdict": verdict,
                 "gate_minimum": gate_minimum,
                 "null_passes_gate": bool(null_passes),
-                "minimum_detectable_effect": mde,
+                "approximate_promotion_threshold": mde,
                 "score_ranking": ranked,
                 "score_ranking_expected": expected,
             },

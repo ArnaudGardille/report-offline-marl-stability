@@ -51,23 +51,21 @@ a hard rejection, so a gate-failing candidate can never outrank a gate-passing o
 each scenario reports a `fingerprint` tying the score to the exact frozen budget that
 produced it.
 
-### Screen power
+### Screen sensitivity
 
-The budget this tier runs at is not a guess. `scripts/screen_power_check.py` measures
-whether the screen can separate deliberately degraded replay from uniform replay, using
-two probe samplers registered outside the frozen package: a distributionally null one
-(uniform on an independently folded key), which fixes the seed-noise floor, and a family
-that collapses each training batch onto `k` distinct transitions, which degrades replay
-monotonically as `k` falls. A screen that cannot see the degraded probes cannot be
-trusted when it reports an improvement.
+`scripts/screen_power_check.py` is a fixed-design sensitivity check. It compares an
+equal-law replay draw with probes that collapse each trained batch onto `k` distinct
+transitions. These are stress instruments, not candidate methods; monotone realized
+performance is a useful diagnostic, not a theorem about replay diversity.
 
-The previously pinned budget (16,384 steps, `return_scale` 16.0) failed that check
-outright: 4% of evaluation points were non-zero, and collapsing every batch onto a
-*single* repeated transition moved the paired delta by 0.7x the noise floor, with the
-probe ranking coming out anti-correlated with true degradation. At the current
-65,536-step, `return_scale` 2.0, 32-eval-episode setting the probes rank monotonically
-and the worst one moves the delta by ~3.6x the noise floor. `scripts/screen_budget_sweep.py`
-records the budget/signal curve behind that choice.
+On the post-#37 implementation with 8 paired seeds, 16,384 steps left only 8.2% of
+STORM evaluation points non-zero. None of the degraded probes separated from the
+equal-law draw and their ordering was inverted. At 65,536 steps and 32 evaluation
+episodes, 45.2% of points were non-zero; the two strongest collapses separated under a
+paired one-sided t comparison and all probes ranked in the expected order. The mildest
+collapse remained unresolved, so this is evidence of improved sensitivity, not a claim
+that the screen detects every meaningful effect. The observed equal-law variability
+implies an approximate promotion threshold of 0.0715 scaled utility on this seed set.
 
 Re-run the check after any change to the scored scenario:
 
@@ -75,14 +73,10 @@ Re-run the check after any change to the scored scenario:
 uv run python scripts/screen_power_check.py --num-seeds 8
 ```
 
-> **Remaining limitation.** Power is adequate, not generous: at 8 seeds the minimum
-> detectable effect is roughly 0.04 in scaled utility, so only a fairly large real
-> improvement is promotable, and the most degraded probe sits just at the edge of
-> resolvability. The 32-seed held-out stage is correspondingly better powered than the
-> search stage. Separately, `support_tolerance` (0.05) is still ~6x looser than the
-> worst degradation the gate scenario actually exhibits (-0.008), so the support gate
-> would not fire even on the most degraded probe; the gate scenario is deterministic
-> across seeds (SEM exactly 0), so tightening it is possible but has not been done.
+> **Remaining limitation.** This is one fixed seed set and an intentionally severe
+> probe family, not a general statistical power guarantee. The shifted held-out STORM
+> task keeps the recalibrated interaction/evaluation budget and horizon-scales the
+> return divisor, but has not itself been sensitivity-calibrated.
 
 ## AI Scientist v2 orchestration
 
@@ -140,8 +134,8 @@ paired seeds, reported on the confirmatory stage and never gating. It is reporte
 rather than enforced deliberately: a gate no known method clears prunes the whole
 search and produces an uninterpretable null instead of a finding, so promoting this
 comparison to a gate should follow evidence that something passes it. Note also that
-with `large_batch_size` unset the buffer draws exactly `batch_size` items, so conformal
-selection is inert and that control measures exact-ratio *weighting*, not the
-support-floored recovering configuration its sampler is named for.
+All shipped learning scenarios draw `large_batch_size=256`, train on `batch_size=64`,
+and use a non-zero support floor, so selection is exercised rather than collapsing to
+loss weighting over the full draw.
 
 Merely completing training is not treated as evidence of improved sample efficiency.

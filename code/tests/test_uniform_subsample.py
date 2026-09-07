@@ -100,6 +100,26 @@ def test_uniform_prefix_reaches_all_stored_buffer_items():
     assert counts.std() < 6.0 * np.sqrt(expected)
 
 
+def test_power_probes_keep_the_same_trained_batch_size_as_uniform():
+    """Sensitivity probes change diversity, not gradient batch size."""
+    from scripts.screen_power_check import _make_collapse_sampler, _uniform_reseed
+
+    batch_size, draw = 64, 256
+    key = jax.random.PRNGKey(3)
+    null_batch, null_weights, _ = _uniform_reseed(
+        _buffer(draw), None, key, None, batch_size
+    )
+    collapsed, collapsed_weights, _ = _make_collapse_sampler(4)(
+        _buffer(draw), None, key, None, batch_size
+    )
+
+    assert null_batch.reward.shape[0] == batch_size
+    assert null_weights.shape == (batch_size,)
+    assert collapsed.reward.shape[0] == batch_size
+    assert collapsed_weights.shape == (batch_size,)
+    assert len(set(_ids(collapsed).tolist())) == 4
+
+
 def test_uniform_is_unchanged_when_the_draw_equals_the_batch():
     """No subsample, no extra key consumption: existing single-draw runs are exact."""
     batch_size = 64
@@ -125,10 +145,9 @@ def test_large_batch_size_makes_selection_expressible():
 def test_shipped_learning_scenarios_actually_exercise_selection():
     """The learning tier must be able to express the mechanism it is studying.
 
-    With ``L == B`` the conformal samplers' Gumbel-top-k degenerates to a permutation
-    and ``support_floor`` defaults to 0, so every "selection" sampler silently reduces
-    to reweighted uniform replay -- and the ratio-free and exact-ratio variants become
-    indistinguishable. Both stages must configure a real draw-then-keep.
+    With ``L == B`` the conformal samplers' Gumbel-top-k degenerates to a permutation,
+    so the tier cannot express selection even though loss weights may still differ.
+    Both stages must configure a real draw-then-keep and a non-zero support floor.
     """
     from conformal_marl.autoresearch.frozen.learning_benchmark import (
         DEFAULT_LEARNING_SCENARIOS,

@@ -89,7 +89,7 @@ class IQLConfig:
     lr: float = 5e-4
     max_grad_norm: float = 10.0
     gamma: float = 0.99
-    batch_size: int = 64  # trained batch B (== L drawn for the uniform sampler)
+    batch_size: int = 64  # trained batch B; every sampler returns exactly this size
     # LaBER large-batch L: the buffer draws this many items per sample; conformal
     # samplers subsample it down to ``batch_size`` (B). ``None`` -> L = B (no
     # subsampling, the ``uniform`` default). A typical LaBER setting is L = m * B

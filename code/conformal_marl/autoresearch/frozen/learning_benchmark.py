@@ -15,6 +15,7 @@ from types import MappingProxyType
 from typing import Any, Iterable, Mapping
 
 import jax
+import jax.numpy as jnp
 import numpy as np
 from scipy import stats
 
@@ -106,24 +107,12 @@ DEFAULT_LEARNING_SCENARIOS = (
         return_scale=4.0,
         support_gate=True,
     ),
-    # Budget and return_scale recalibrated against a measured power check (see
-    # ``scripts/screen_power_check.py`` and ``scripts/screen_budget_sweep.py``); the
-    # previous 16_384/16.0 pinning is what PR #34 flagged as under-powered.
-    #
-    # At 16_384 steps only 4% of evaluation points were non-zero, the achievable
-    # scaled return was 0.039, and the screen could not resolve *any* degraded
-    # sampler: collapsing every training batch onto a single repeated transition
-    # moved the paired delta by 0.7x the seed-noise SEM, and the score ranking of the
-    # probe family came out anti-correlated with their true degradation.
-    #
-    # At 65_536 steps with 32 evaluation episodes the same probes rank monotonically
-    # in degradation and the worst probe moves the delta by 3.6x the noise floor.
-    # The step increase is close to free in wall-clock (JIT compilation dominates at
-    # this scale: 38s -> 48s for four seeds), which is why it is preferred over
-    # buying power with more seeds. return_scale tracks the return actually reached
-    # at this budget (observed curve max 2.40) instead of the converged-play 16.0,
-    # which had been shrinking every effect size by ~25x and made minimum_score and
-    # support_tolerance impossible to interpret.
+    # Fixed-design sensitivity check: at 16_384 steps none of three deliberately
+    # diversity-collapsed STORM probes separated from equal-law replay and their
+    # realized ordering was inverted. At 65_536 steps the ordering is monotone and
+    # the two strongest degradations separate; the mildest still does not. See
+    # ``scripts/screen_power_check.py``. The return divisor follows the observed
+    # 2.445 curve maximum rather than the previously assumed converged-play 16.0.
     LearningScenario(
         name="storm_cooperative",
         env_name="storm_2p",
@@ -230,9 +219,11 @@ def _run_sampler(scenario: LearningScenario, sampler_name: str, seeds: np.ndarra
         config_overrides=overrides,
         **scenario.env_kwargs,
     )
-    train = jax.jit(jax.vmap(make_train(spec.default_config, env)))
-    keys = jax.vmap(jax.random.PRNGKey)(seeds)
-    out = train(keys)
+    # Compile one run and reuse it for every seed. A vmapped JIT makes the XLA graph
+    # and CPU compile time grow with the screening sample size.
+    train = jax.jit(make_train(spec.default_config, env))
+    outputs = [train(jax.random.PRNGKey(int(seed))) for seed in seeds]
+    out = jax.tree.map(lambda *values: jnp.stack(values), *outputs)
     # Pull back only the two curves the score reads. ``make_train`` also returns
     # ``final_params`` and per-update loss/epsilon traces for every seed; copying
     # those to host on each of the 4 runs per evaluation is pure transfer cost.
