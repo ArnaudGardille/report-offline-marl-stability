@@ -15,6 +15,7 @@ from types import MappingProxyType
 from typing import Any, Iterable, Mapping
 
 import jax
+import jax.numpy as jnp
 import numpy as np
 from scipy import stats
 
@@ -106,12 +107,18 @@ DEFAULT_LEARNING_SCENARIOS = (
         return_scale=4.0,
         support_gate=True,
     ),
+    # Fixed-design sensitivity check: at 16_384 steps none of three deliberately
+    # diversity-collapsed STORM probes separated from equal-law replay and their
+    # realized ordering was inverted. At 65_536 steps the ordering is monotone and
+    # the two strongest degradations separate; the mildest still does not. See
+    # ``scripts/screen_power_check.py``. The return divisor follows the observed
+    # 2.445 curve maximum rather than the previously assumed converged-play 16.0.
     LearningScenario(
         name="storm_cooperative",
         env_name="storm_2p",
         env_kwargs={"num_inner_steps": 48},
         config_overrides={
-            "total_timesteps": 16_384,
+            "total_timesteps": 65_536,
             "num_envs": 8,
             "num_steps": 32,
             "num_grad_steps": 4,
@@ -120,14 +127,14 @@ DEFAULT_LEARNING_SCENARIOS = (
             "batch_size": 64,
             "large_batch_size": 256,
             "support_floor": 0.05,
-            "buffer_size": 16_384,
+            "buffer_size": 65_536,
             "cal_size": 64,
             "epsilon_anneal_time": 10_000,
-            "eval_episodes": 8,
+            "eval_episodes": 32,
             "eval_steps": 48,
             "eval_during_training": True,
         },
-        return_scale=16.0,
+        return_scale=2.0,
     ),
 )
 
@@ -147,10 +154,10 @@ DEFAULT_LEARNING_SCENARIOS = (
 #   uniform return 0.982 at N=3 and 0.975 at N=4. An earlier revision of this scenario
 #   used ``5.0``, which made the confirmatory support gate 25% more permissive in raw
 #   return than the screening gate.
-# * STORM scales with the horizon, because its return is a sum over inner steps:
-#   ``16.0 * 64 / 48``. Measured returns grow by rather more than the horizon ratio
-#   (learning progress differs too), so this equalizes the mechanical part of the
-#   change only; it is not a full recalibration of the two stages onto one scale.
+# * STORM uses the recalibrated search budget and scales its return divisor with the
+#   horizon, because return is a sum over inner steps: ``2.0 * 64 / 48``. This
+#   equalizes the mechanical part of the task shift; it is not an empirical
+#   calibration of the held-out task, whose result remains confirmatory.
 HELDOUT_LEARNING_SCENARIOS = (
     LearningScenario(
         name="simultaneous_attack_support_4_agents",
@@ -183,7 +190,7 @@ HELDOUT_LEARNING_SCENARIOS = (
         env_name="storm_2p",
         env_kwargs={"num_inner_steps": 64},
         config_overrides={
-            "total_timesteps": 20_480,
+            "total_timesteps": 65_536,
             "num_envs": 8,
             "num_steps": 32,
             "num_grad_steps": 4,
@@ -192,14 +199,14 @@ HELDOUT_LEARNING_SCENARIOS = (
             "batch_size": 64,
             "large_batch_size": 256,
             "support_floor": 0.05,
-            "buffer_size": 20_480,
+            "buffer_size": 65_536,
             "cal_size": 64,
-            "epsilon_anneal_time": 12_000,
-            "eval_episodes": 8,
+            "epsilon_anneal_time": 10_000,
+            "eval_episodes": 32,
             "eval_steps": 64,
             "eval_during_training": True,
         },
-        return_scale=16.0 * 64 / 48,
+        return_scale=2.0 * 64 / 48,
     ),
 )
 
@@ -212,13 +219,18 @@ def _run_sampler(scenario: LearningScenario, sampler_name: str, seeds: np.ndarra
         config_overrides=overrides,
         **scenario.env_kwargs,
     )
-    train = jax.jit(jax.vmap(make_train(spec.default_config, env)))
-    keys = jax.vmap(jax.random.PRNGKey)(seeds)
-    out = train(keys)
+    # Compile one run and reuse it for every seed. A vmapped JIT makes the XLA graph
+    # and CPU compile time grow with the screening sample size.
+    train = jax.jit(make_train(spec.default_config, env))
+    output_keys = ("returns", "end_greedy_return")
+    outputs = []
+    for seed in seeds:
+        run = train(jax.random.PRNGKey(int(seed)))
+        outputs.append({key: run[key] for key in output_keys})
+    out = jax.tree.map(lambda *values: jnp.stack(values), *outputs)
     # Pull back only the two curves the score reads. ``make_train`` also returns
-    # ``final_params`` and per-update loss/epsilon traces for every seed; copying
-    # those to host on each of the 4 runs per evaluation is pure transfer cost.
-    return jax.device_get({k: out[k] for k in ("returns", "end_greedy_return")})
+    # parameters and per-update traces; retaining and stacking those is pure overhead.
+    return jax.device_get(out)
 
 
 def _sem(values: np.ndarray) -> float:

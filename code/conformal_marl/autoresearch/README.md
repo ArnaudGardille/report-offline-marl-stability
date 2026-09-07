@@ -51,13 +51,32 @@ a hard rejection, so a gate-failing candidate can never outrank a gate-passing o
 each scenario reports a `fingerprint` tying the score to the exact frozen budget that
 produced it.
 
-> **Known limitation.** At the pinned STORM budget the reward is very sparse -- a
-> measured 2-seed baseline run produced non-zero greedy return at only 8 of 128 eval
-> points, with a maximum of 0.5 against a `return_scale` of 16.0. The scored deltas
-> therefore sit around 1e-3 while `support_tolerance` is 0.05, so the screen currently
-> has little power to separate candidates. Recalibrating `return_scale` and raising the
-> STORM budget (validated by a power check against a deliberately degraded sampler)
-> is open work; the tier is safe to run but should not yet be read as a strong signal.
+### Screen sensitivity
+
+`scripts/screen_power_check.py` is a fixed-design sensitivity check. It compares an
+equal-law replay draw with probes that collapse each trained batch onto `k` distinct
+transitions. These are stress instruments, not candidate methods; monotone realized
+performance is a useful diagnostic, not a theorem about replay diversity.
+
+On the post-#37 implementation with 8 paired seeds, 16,384 steps left only 8.2% of
+STORM evaluation points non-zero. None of the degraded probes separated from the
+equal-law draw and their ordering was inverted. At 65,536 steps and 32 evaluation
+episodes, 45.2% of points were non-zero; the two strongest collapses separated under a
+paired one-sided t comparison and all probes ranked in the expected order. The mildest
+collapse remained unresolved, so this is evidence of improved sensitivity, not a claim
+that the screen detects every meaningful effect. The observed equal-law variability
+implies an approximate promotion threshold of 0.0715 scaled utility on this seed set.
+
+Re-run the check after any change to the scored scenario:
+
+```bash
+uv run python scripts/screen_power_check.py --num-seeds 8
+```
+
+> **Remaining limitation.** This is one fixed seed set and an intentionally severe
+> probe family, not a general statistical power guarantee. The shifted held-out STORM
+> task keeps the recalibrated interaction/evaluation budget and horizon-scales the
+> return divisor, but has not itself been sensitivity-calibrated.
 
 ## AI Scientist v2 orchestration
 
@@ -115,8 +134,8 @@ paired seeds, reported on the confirmatory stage and never gating. It is reporte
 rather than enforced deliberately: a gate no known method clears prunes the whole
 search and produces an uninterpretable null instead of a finding, so promoting this
 comparison to a gate should follow evidence that something passes it. Note also that
-with `large_batch_size` unset the buffer draws exactly `batch_size` items, so conformal
-selection is inert and that control measures exact-ratio *weighting*, not the
-support-floored recovering configuration its sampler is named for.
+All shipped learning scenarios draw `large_batch_size=256`, train on `batch_size=64`,
+and use a non-zero support floor, so selection is exercised rather than collapsing to
+loss weighting over the full draw.
 
 Merely completing training is not treated as evidence of improved sample efficiency.

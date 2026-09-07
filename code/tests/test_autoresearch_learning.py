@@ -426,6 +426,12 @@ def test_heldout_return_scales_keep_the_gate_equally_strict():
     assert heldout["storm_cooperative_long_horizon"].return_scale == pytest.approx(
         search["storm_cooperative"].return_scale * horizon_ratio
     )
+    # Only the task horizon and held-out seeds should create the confirmatory shift.
+    search_cfg = search["storm_cooperative"].config_overrides
+    heldout_cfg = heldout["storm_cooperative_long_horizon"].config_overrides
+    assert heldout_cfg["total_timesteps"] == search_cfg["total_timesteps"]
+    assert heldout_cfg["buffer_size"] == search_cfg["buffer_size"]
+    assert heldout_cfg["eval_episodes"] == search_cfg["eval_episodes"]
 
 
 def test_learning_profile_dispatch_selects_the_heldout_scenarios(monkeypatch):
