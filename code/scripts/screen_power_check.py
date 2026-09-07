@@ -188,27 +188,31 @@ def main() -> None:
 
     # Compare deliberately degraded replay with an equal-law draw on each seed. Their
     # shared uniform control then cancels before estimating the standard error.
-    null = results["probe_uniform_reseed"]
+    equal_law = results["probe_uniform_reseed"]
     verdict: dict[str, dict] = {}
     print("\n== verdict ==")
 
     gate_minimum = 0.001  # the learning stage's minimum_score in orchestration.py
-    null_passes = null["primary_score"] >= gate_minimum
+    equal_law_passes = equal_law["primary_score"] >= gate_minimum
     # A one-sided lower bound on a zero-mean delta is negative by construction, so a
     # equal-law sampler *should* fail the gate. The approximation below shows how large
     # an improvement must be before the bound clears the threshold at this variance.
-    scored_null = [p for p in null["scenarios"].values() if not p["support_gate"]]
-    mde = gate_minimum + null["critical_value"] * float(
-        np.mean([p["utility_sem"] for p in scored_null])
+    scored_equal_law = [
+        payload
+        for payload in equal_law["scenarios"].values()
+        if not payload["support_gate"]
+    ]
+    threshold = gate_minimum + equal_law["critical_value"] * float(
+        np.mean([payload["utility_sem"] for payload in scored_equal_law])
     )
     print(
         f"  gate calibration: a statistically null sampler scores "
-        f"{null['primary_score']:+.5f} vs minimum_score={gate_minimum} -> "
-        f"{'passes' if null_passes else 'rejected (expected: the bound is one-sided)'}"
+        f"{equal_law['primary_score']:+.5f} vs minimum_score={gate_minimum} -> "
+        f"{'passes' if equal_law_passes else 'rejected (expected: the bound is one-sided)'}"
     )
     print(
         f"  approximate promotion threshold under observed equal-law variance: "
-        f"{mde:+.5f} scaled utility at {args.num_seeds} seeds"
+        f"{threshold:+.5f} scaled utility at {args.num_seeds} seeds"
     )
 
     ordering = [(p, results[p]["primary_score"]) for p in probes]
@@ -220,22 +224,28 @@ def main() -> None:
     print(f"  expected diagnostic ordering:  {expected}")
     print(f"  -> monotone in degradation: {'yes' if ranked == expected else 'NO'}")
 
-    for scenario_name, null_payload in null["scenarios"].items():
-        floor = null_payload["utility_sem"]
-        null_delta = null_payload["mean_utility_delta"]
-        crit = null["critical_value"]
+    for scenario_name, equal_law_payload in equal_law["scenarios"].items():
+        floor = equal_law_payload["utility_sem"]
+        equal_law_delta = equal_law_payload["mean_utility_delta"]
+        crit = equal_law["critical_value"]
         print(
-            f"\n  {scenario_name}: null delta {null_delta:+.5f}, "
-            f"noise floor (SEM) {floor:.5f}"
+            f"\n  {scenario_name}: equal-law delta {equal_law_delta:+.5f}, "
+            f"empirical SEM {floor:.5f}"
         )
-        verdict[scenario_name] = {"null_delta": null_delta, "noise_sem": floor, "probes": {}}
+        verdict[scenario_name] = {
+            "equal_law_delta": equal_law_delta,
+            "equal_law_sem": floor,
+            "probes": {},
+        }
         for probe in probes[1:]:
             payload = results[probe]["scenarios"][scenario_name]
             delta = payload["mean_utility_delta"]
             sem = payload["utility_sem"]
-            null_paired = np.asarray(null_payload["paired_utility_delta"], dtype=np.float64)
+            equal_law_paired = np.asarray(
+                equal_law_payload["paired_utility_delta"], dtype=np.float64
+            )
             probe_paired = np.asarray(payload["paired_utility_delta"], dtype=np.float64)
-            paired_separation = null_paired - probe_paired
+            paired_separation = equal_law_paired - probe_paired
             separation = float(paired_separation.mean())
             separation_sem = float(
                 paired_separation.std(ddof=1) / np.sqrt(paired_separation.size)
@@ -246,8 +256,8 @@ def main() -> None:
             verdict[scenario_name]["probes"][probe] = {
                 "delta": delta,
                 "sem": sem,
-                "delta_vs_noise_floor": ratio,
-                "separation_from_null": separation,
+                "delta_vs_equal_law_sem": ratio,
+                "separation_from_equal_law": separation,
                 "separation_sem": separation_sem,
                 "required_separation": spread,
                 "resolved": bool(resolved),
@@ -268,8 +278,8 @@ def main() -> None:
                 "probes": results,
                 "verdict": verdict,
                 "gate_minimum": gate_minimum,
-                "null_passes_gate": bool(null_passes),
-                "approximate_promotion_threshold": mde,
+                "equal_law_passes_gate": bool(equal_law_passes),
+                "approximate_promotion_threshold": threshold,
                 "score_ranking": ranked,
                 "score_ranking_expected": expected,
             },

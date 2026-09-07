@@ -222,12 +222,15 @@ def _run_sampler(scenario: LearningScenario, sampler_name: str, seeds: np.ndarra
     # Compile one run and reuse it for every seed. A vmapped JIT makes the XLA graph
     # and CPU compile time grow with the screening sample size.
     train = jax.jit(make_train(spec.default_config, env))
-    outputs = [train(jax.random.PRNGKey(int(seed))) for seed in seeds]
+    output_keys = ("returns", "end_greedy_return")
+    outputs = []
+    for seed in seeds:
+        run = train(jax.random.PRNGKey(int(seed)))
+        outputs.append({key: run[key] for key in output_keys})
     out = jax.tree.map(lambda *values: jnp.stack(values), *outputs)
     # Pull back only the two curves the score reads. ``make_train`` also returns
-    # ``final_params`` and per-update loss/epsilon traces for every seed; copying
-    # those to host on each of the 4 runs per evaluation is pure transfer cost.
-    return jax.device_get({k: out[k] for k in ("returns", "end_greedy_return")})
+    # parameters and per-update traces; retaining and stacking those is pure overhead.
+    return jax.device_get(out)
 
 
 def _sem(values: np.ndarray) -> float:
