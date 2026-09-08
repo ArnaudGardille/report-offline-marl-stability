@@ -71,8 +71,9 @@ latexmk -f -pdf -interaction=nonstopmode AAMAS_2024_sample.tex
   For paper-only PRs, create an isolated worktree off `origin/main`
   (`git worktree add ... origin/main`) so you never touch the active tree; clean up with
   `git worktree remove --force` after merge. Verify you haven't clobbered in-flight code files.
-- Only commit/push when the user asks. End commit messages with the
-  `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>` trailer.
+- Only commit/push when the user asks. End commit messages with a
+  `Co-Authored-By: <assistant model> <noreply@anthropic.com>` trailer — the harness
+  gives you the exact model string to use for the session.
 
 ## What is and isn't committed
 
@@ -85,10 +86,10 @@ latexmk -f -pdf -interaction=nonstopmode AAMAS_2024_sample.tex
 
 ## Figure naming
 
-Experiment figures are `code/results/m<milestone>_<name>[_<env>_<layout>]_<scale>.png`. The
-env/layout is folded into the name so layouts don't clobber each other; `_smoke` = throwaway
-(gitignored), `_full` = camera-ready GPU run. The paper's `\graphicspath` includes
-`{code/results/}`.
+The milestone figures are `code/results/m<milestone>_<name>[_<env>_<layout>].png` (env/layout
+folded into the name so layouts don't clobber each other). Newer experiment figures append a
+scale tag: `_smoke` = throwaway CPU/CI artifact (gitignored), `_full` = camera-ready GPU run,
+and may drop the `m<milestone>_` prefix. The paper's `\graphicspath` includes `{code/results/}`.
 
 ## Memory
 

@@ -85,10 +85,10 @@ latexmk -f -pdf -interaction=nonstopmode AAMAS_2024_sample.tex
 
 ## Figure naming
 
-Experiment figures are `code/results/m<milestone>_<name>[_<env>_<layout>]_<scale>.png`. The
-env/layout is folded into the name so layouts don't clobber each other; `_smoke` = throwaway
-(gitignored), `_full` = camera-ready GPU run. The paper's `\graphicspath` includes
-`{code/results/}`.
+The milestone figures are `code/results/m<milestone>_<name>[_<env>_<layout>].png` (env/layout
+folded into the name so layouts don't clobber each other). Newer experiment figures append a
+scale tag: `_smoke` = throwaway CPU/CI artifact (gitignored), `_full` = camera-ready GPU run,
+and may drop the `m<milestone>_` prefix. The paper's `\graphicspath` includes `{code/results/}`.
 
 ## Memory
 

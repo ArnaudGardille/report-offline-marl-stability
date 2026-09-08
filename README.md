@@ -41,8 +41,8 @@ that one score, three uses follow.
 3. **Detection (the headline).** A conformal **test martingale** flags when the perceived
    environment has drifted, with an *anytime* false-alarm guarantee via Ville's inequality,
    and drives a **two-channel controller** whose frozen alarm channel preserves the
-   guarantee while an adaptive channel reads the drift rate. On standard cooperative
-   benchmarks it detects co-learner drift faster than a TD-error heuristic (AES) at matched
+   guarantee while an adaptive channel reads the drift rate. On a standard cooperative
+   benchmark it detects co-learner drift faster than a TD-error heuristic (AES) at matched
    false-alarm, and the same martingale *certifies* the replay correction (Lemma 4.3).
 
 ## Environment suite
@@ -53,9 +53,9 @@ Implemented on an Independent Q-Learning (IQL) backbone via a central env factor
 | Env | Role |
 | --- | --- |
 | **Simultaneous-Attack** (custom) | diagnostic / martingale false-alarm lab; isolates co-learner non-stationarity in a single-state bandit |
-| **MPE `simple_spread`** | standard cooperative benchmark (JaxMARL-native) |
-| **SMAX** | action-masked env (the ratio-free regime); used for training/selection — detection on masked envs is deliberately out of scope (see below) |
-| **Overcooked** | partner-swap intervention → a known drift event for the detection benchmark |
+| **MPE `simple_spread`** | primary drift-detection testbed (JaxMARL-native): the partner-swap detection headline and the return-recovery study both run here |
+| **SMAX** | action-masked env (ratio loses support); used for training/selection — the current fixed-intervention detection benchmark guards masked envs out (see below) |
+| **Overcooked** | partner-swap intervention corroborating the detection result at a smaller training budget |
 
 ## Repository layout
 
@@ -130,8 +130,10 @@ paper's §5:
 ## Status
 
 The paper reads coherently end-to-end (abstract → §4 theory → §5 real JAX/JaxMARL results).
-The full test suite passes. Known future work: a mask-aware drift
-intervention for **SMAX detection** (currently rejected by design — see the note in
+The full test suite passes. Known future work: full-scale convergence on the
+masked / partially observable testbeds (SMAX, Overcooked), where the stored-state
+GRU detector already runs but a mask-aware drift *intervention* is still needed for
+the scripted benchmark (the current one guards masked envs out — see the note in
 `code/RUN_ON_GPU.md`), and a conformal-occupancy "correct-the-target" probe.
 
 ## Citation
