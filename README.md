@@ -17,9 +17,11 @@ as their policies drift, the perceived dynamics become non-stationary and previo
 collected transitions turn misleading. The usual remedy — shrinking the replay buffer —
 discards the sample efficiency that motivates off-policy learning. We recast a stored
 transition's staleness as its *conformity* to the other agents' current policies and
-score it with a distribution-free, calibrated non-conformity score (an exact
-`−log ρ` importance score when policies are available, a ratio-free `−log π_cur` score
-when they are not). From that one score, three uses follow.
+score it with a distribution-free, calibrated non-conformity score: an exact
+`−log ρ` importance score when both past and present policies are available, a
+ratio-free `−log π_cur` score when only the current policies can be queried, and a
+learned model-based surprise score when the policies cannot be queried at all. From
+that one score, three uses follow.
 
 ## Three contributions
 
@@ -32,8 +34,10 @@ when they are not). From that one score, three uses follow.
    starving exploration (Theorem 4.2). We confirm this empirically — it is a deliberate
    **negative result**, not a bug.
 2. **Certified replay.** Where the importance ratio is available, ρ-weighted conformal
-   p-values and time-decay (NexCP) calibration **correct** the replay distribution with
-   finite-sample guarantees instead of filtering it.
+   p-values restore calibration against the current law; where it is not, time-decay
+   (NexCP) weights give a one-sided coverage guarantee that decays gracefully with the
+   total-variation drift. Either way the replay batch is **certified** under quantified
+   drift, not filtered.
 3. **Detection (the headline).** A conformal **test martingale** flags when the perceived
    environment has drifted, with an *anytime* false-alarm guarantee via Ville's inequality,
    and drives a **two-channel controller** whose frozen alarm channel preserves the
@@ -59,7 +63,7 @@ Implemented on an Independent Q-Learning (IQL) backbone via a central env factor
 .
 ├── AAMAS_2024_sample.tex      # the paper (main deliverable)
 ├── AAMAS_2024_sample.pdf      # last compiled build (committed)
-├── sample.bib                 # bibliography (verified against publisher records)
+├── sample.bib                 # bibliography
 ├── aamas.cls, ACM-Reference-Format.bst   # AAMAS/acmart class + bst (vendored)
 ├── imgs/                      # report/explanatory figures used by the .tex
 ├── notebooks/colab_gpu.ipynb  # GPU runbook for the heavy benchmarks
@@ -67,7 +71,7 @@ Implemented on an Independent Q-Learning (IQL) backbone via a central env factor
 │   ├── conformal_marl/        # the package: envs, iql, conformal, martingale,
 │   │                          #   controller, weighted_conformal, samplers, …
 │   ├── scripts/               # runnable experiments & benchmarks
-│   ├── tests/                 # 90 tests across 13 files
+│   ├── tests/                 # toolchain and scientific validity tests
 │   ├── results/               # committed camera-ready figures (*.png)
 │   └── outputs/               # raw run JSON (gitignored; regenerable)
 └── sources/                   # reference PDFs (gitignored — bulky/copyrighted)
@@ -94,7 +98,7 @@ below). From `code/`:
 
 ```bash
 uv sync                       # create .venv and install pinned deps
-uv run pytest -q              # 90 tests (toolchain + per-milestone validity gates)
+uv run pytest -q              # full toolchain + scientific validity suite
 
 # headline experiments (CPU-smoke scale; GPU for full scale — see code/RUN_ON_GPU.md)
 uv run python scripts/run_benchmark.py --env overcooked --experiment detection --smoke
@@ -126,7 +130,7 @@ paper's §5:
 ## Status
 
 The paper reads coherently end-to-end (abstract → §4 theory → §5 real JAX/JaxMARL results).
-Milestones M0–M8 are merged; 90 tests pass. Known future work: a mask-aware drift
+The full test suite passes. Known future work: a mask-aware drift
 intervention for **SMAX detection** (currently rejected by design — see the note in
 `code/RUN_ON_GPU.md`), and a conformal-occupancy "correct-the-target" probe.
 
@@ -137,7 +141,7 @@ If you use this work, please cite the paper:
 ```bibtex
 @inproceedings{conformalreplay_marl,
   title     = {Conformal Replay for Off-Policy Multi-Agent Reinforcement Learning},
-  author    = {Gardille, Arnaud},
+  author    = {Gardille, Arnaud and Lahire, Thibault},
   booktitle = {Proc. of the International Conference on Autonomous Agents and Multiagent Systems (AAMAS)},
   year      = {2026},
   note      = {Under review}

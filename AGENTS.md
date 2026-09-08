@@ -57,7 +57,7 @@ latexmk -f -pdf -interaction=nonstopmode AAMAS_2024_sample.tex
   `jax.tree_map` alias removed in JAX 0.6.0. **Do not bump JAX past ~0.5.x** — it breaks
   JaxMARL. `code/tests/test_smoke.py` guards this and will fail loudly if violated.
 - macOS/Apple Silicon uses `jax[cpu]`. **Never install `jax-metal`** — it breaks JaxMARL.
-- Run the full suite before claiming done: `uv run pytest -q` (90 tests). Per-milestone tests
+- Run the full suite before claiming done: `uv run pytest -q`. Per-milestone tests
   are validity gates (martingale `E[M_t]=1`/Ville, p-value super-uniformity, IQL learns) —
   treat a failure there as a scientific regression, not a flaky test.
 - Lint with `uv run ruff check` (line-length 100, target py312).
@@ -93,7 +93,7 @@ env/layout is folded into the name so layouts don't clobber each other; `_smoke`
 ## Memory
 
 Persistent notes live in
-`/Users/arnaud/.Codex/projects/-Users-arnaud-Development-report-offline-marl-stability/memory/`
+`/Users/arnaud/.codex/memories/`
 (indexed by `MEMORY.md`). Key entries: the paper direction, the JAX implementation plan, the
 results summary, and the research-directions verdicts behind the detection/certified-replay
 pivot. Memories are point-in-time — verify file:line claims against current code before relying
